@@ -98,6 +98,7 @@ extern DLL void _Assert(const char* Exp, const char* File, int Line);
 #include "waveout.h"
 #include "association.h"
 #include "color.h"
+#include "mbstring.h"
 
 #ifdef __cplusplus
 }

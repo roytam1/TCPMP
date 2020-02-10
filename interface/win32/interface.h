@@ -34,9 +34,13 @@ void Interface_Done();
 #define MSG_ERROR						WM_APP + 0x203
 
 #define IF_ALL_TYPES					0x0CA
+#define IF_VIEW							0x0DF
+#define IF_CONTROL						0x0F2
+#define IF_HELP							0x0FC
 #define IF_OPTIONS						0x0DD
 #define IF_OPTIONS_SPEED				0x0CD
 #define IF_OPTIONS_REPEAT			    0x132
+#define IF_OPTIONS_REPEATTRACK		    0x135
 #define IF_OPTIONS_SHUFFLE			    0x133
 #define	IF_OPTIONS_ZOOM					0x0CF
 #define IF_OPTIONS_ZOOM_FIT_SCREEN		0x138
@@ -113,6 +117,9 @@ void Interface_Done();
 #define IF_OPTIONS_VIEW_TITLEBAR		0x240
 #define IF_OPTIONS_VIEW_TRACKBAR		0x241
 #define IF_OPTIONS_VIEW_TASKBAR			0x242
+#define IF_OPTIONS_VIEW_BUTTONBAR		0x249
+#define IF_OPTIONS_VIEW_MENUBAR			0x25A
+#define IF_OPTIONS_VIEW_WINTITLE		0x25B
 #define IF_OPTIONS_VIEW					0x20E
 #define IF_OPTIONS_ASPECT				0x20F
 #define IF_OPTIONS_ASPECT_SQUARE		0x210
@@ -169,6 +176,9 @@ void Interface_Done();
 #define IF_TITLEBAR						0x300
 #define IF_TRACKBAR						0x301
 #define IF_TASKBAR						0x302
+#define IF_BUTTONBAR					0x303
+#define IF_MENUBAR						0x304
+#define IF_WINTITLE						0x305
 
 #define IF_SKINPATH						0x503
 #define IF_SKINNO						0x500

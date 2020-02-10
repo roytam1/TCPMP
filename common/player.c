@@ -21,6 +21,7 @@
  *
  ****************************************************************************/
 
+#include "Windows.h"
 #include "common.h"
 #include "playlist/m3u.h"
 #include "../config.h"
@@ -61,6 +62,7 @@ typedef struct player_base
 	bool_t FlowBackground;
 	bool_t MicroDrive;
 	bool_t Repeat;
+	bool_t RepeatTrack;
 	bool_t Shuffle;
 	bool_t PlayAtOpen;
 	bool_t PlayAtOpenFull;
@@ -218,6 +220,7 @@ static const datatable PlayerParams[] =
 {
 	{ PLAYER_AUTOPREROTATE,	TYPE_BOOL, DF_SETUP },
 	{ PLAYER_REPEAT,		TYPE_BOOL, DF_SETUP|DF_HIDDEN },
+	{ PLAYER_REPEATTRACK,	TYPE_BOOL, DF_SETUP|DF_HIDDEN },
 	{ PLAYER_SHUFFLE,		TYPE_BOOL, DF_SETUP|DF_HIDDEN },
 	{ PLAYER_KEEPPLAY_AUDIO,TYPE_BOOL, DF_SETUP },
 	{ PLAYER_KEEPPLAY_VIDEO,TYPE_BOOL, DF_SETUP },
@@ -2068,29 +2071,28 @@ static void Unload(player_base* p,bool_t KeepPlay,bool_t KeepStreams,bool_t Refr
 static void URLToTitle(tchar_t* Title, int TitleLen, const tchar_t* URL)
 {
 	tchar_t Ext[MAXPATH];
-	tchar_t *i,*j;
-	bool_t HasHost;
-	i = (tchar_t*) GetMime(URL,NULL,0,&HasHost);
-	if (i==URL || !HasHost || tcschr(i,'/') || tcschr(i,'\\'))
+	tchar_t *cp;
+	bool_t HasHost
+		;
+	cp = (tchar_t*) GetMime(URL,NULL,0,&HasHost);
+	if (cp==URL || !HasHost || tcschr(cp,'/') || tcschr(cp,'\\'))
 		SplitURL(URL,NULL,0,NULL,0,Title,TitleLen,Ext,TSIZEOF(Ext));
 	else
 		tcscpy_s(Title,TitleLen,URL);
 
-	// replace %20 and '_' with space
-	for (j=i=Title;*i;++i)
+	// replace ' ' and '_' with space
+	cp = Title;
+	while(*cp != '\0')
 	{
-		if (*i=='_')
-			*j++ = ' ';
-		else
-		if (i[0]=='%' && i[1]=='2' && i[2]=='0')
+		if(IsDBCSLeadByte(*cp) == 0)
 		{
-			*j++ = ' ';
-			i += 2;
+			if(*cp == ' ') {
+				*cp = '_';
+			}
 		}
-		else
-			*j++ = *i;
+		cp = CharNext(cp);
 	}
-	*j=0;
+
 }
 
 static bool_t LoadPlaylist(player* Player,const array* List,stream* Input,int* Index,const tchar_t* Path,const void* Probe,int ProbeSize)
@@ -2557,7 +2559,15 @@ static int NextPrev(player_base* p,int Dir,bool_t StopIfEnd,bool_t NotTheSame)
 	{
 		int Index = FindCurrentIndex(p);
 		int Tries;
-		
+	
+		// TODO
+		// track repeat
+		if (StopIfEnd && p->RepeatTrack)
+		{
+			Load(p,1,0,0);
+			return ERR_NONE;
+		}
+
 		for (Tries=NotTheSame?1:0;Tries<p->PlayListCount;++Tries)
 		{
 			Index += Dir;
@@ -2572,7 +2582,6 @@ static int NextPrev(player_base* p,int Dir,bool_t StopIfEnd,bool_t NotTheSame)
 					Notify(p,PLAYER_PERCENT,0);
 					return ERR_NONE;
 				}
-				RandomizePlayIndex(p,0);
 				Index -= Dir*p->PlayListCount;
 			}
 			if (p->Current != p->PlayIndex[Index])
@@ -3141,6 +3150,7 @@ static int Get(player_base* p, int No, void* Data, int Size)
 	case PLAYER_UNDERRUN: GETVALUE(p->UnderRun,int); break;
 	case PLAYER_AUDIO_UNDERRUN: GETVALUE(p->AudioUnderRun,int); break;
 	case PLAYER_REPEAT: GETVALUE(p->Repeat,bool_t); break;
+	case PLAYER_REPEATTRACK: GETVALUE(p->RepeatTrack,bool_t); break;
 	case PLAYER_SHUFFLE: GETVALUE(p->Shuffle,bool_t); break;
 	case PLAYER_PLAYATOPEN: GETVALUE(p->PlayAtOpen,bool_t); break;
 	case PLAYER_PLAYATOPEN_FULL: GETVALUE(p->PlayAtOpenFull,bool_t); break;
@@ -3538,6 +3548,7 @@ static int Set(player_base* p, int No, const void* Data, int Size)
 	case PLAYER_PLAY_SPEED: SETVALUE(p->PlaySpeed,fraction,UpdateSpeed(p)); break;
 	case PLAYER_FFWD_SPEED: SETVALUE(p->FFwdSpeed,fraction,UpdateSpeed(p)); break;
 	case PLAYER_REPEAT: SETVALUE(p->Repeat,bool_t,ERR_NONE); break;
+	case PLAYER_REPEATTRACK: SETVALUE(p->RepeatTrack,bool_t,ERR_NONE); break;
 	case PLAYER_PLAYATOPEN: SETVALUE(p->PlayAtOpen,bool_t,ERR_NONE); break;
 	case PLAYER_PLAYATOPEN_FULL: SETVALUE(p->PlayAtOpenFull,bool_t,ERR_NONE); break;
 	case PLAYER_EXIT_AT_END: SETVALUE(p->ExitAtEnd,bool_t,ERR_NONE); break;
@@ -4009,6 +4020,7 @@ static int Create(player_base* p)
 	p->Volume = 90;
 #endif
 	p->Repeat = 1;
+	p->RepeatTrack = 0;
 #ifdef TARGET_WIN32
 	p->Aspect.Num = 0;
 #else

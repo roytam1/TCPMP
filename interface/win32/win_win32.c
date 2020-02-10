@@ -690,7 +690,40 @@ static void DestroyToolBar(win* p)
 	p->WndTB = NULL;
 }
 
-static void AddMenu(win* p)
+static void CreateMenuBar(win* p)
+{
+	HMENU  hMenu;
+
+	hMenu = CreateMenu();
+	MenuDef(p, p->MenuDef, 0, &hMenu);
+	p->Menu2[0] = hMenu;
+	p->Menu2[1] = hMenu;
+	p->Menu3 = hMenu;	
+	SetMenu( p->Wnd, hMenu );
+
+	DrawMenuBar( p->Wnd );
+
+	return;
+}
+
+static void CreateSubMenu(win* p)
+{
+	HMENU  hMenu;
+	tchar_t s[256];
+
+	hMenu = CreatePopupMenu();
+	MenuDef(p, p->MenuDef, 0, &hMenu);
+
+	AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+	tcscpy_s(s,TSIZEOF(s),LangStr(INTERFACE_ID ,IF_FILE_EXIT));
+	AppendMenu(hMenu, MF_STRING, IF_FILE_EXIT, s);	
+
+	p->SubMenu = hMenu;
+
+	return;
+}
+
+static void Add(win* p)
 {
 	TBBUTTONINFO Info;
 	TBBUTTON Button;
@@ -750,18 +783,34 @@ void WinBitmap(win* p,int BitmapId16, int BitmapId32, int BitmapNum)
 
 static void CreateToolBar(win* p)
 {
+	DWORD dwStyle;
 	RECT r;
 
 	if ((p->Flags & WIN_NOMENU) == 0)
 	{
-		p->WndTB = CreateWindowEx(0, TOOLBARCLASSNAME, (LPCTSTR) NULL, 
-		WS_CHILD|TBSTYLE_FLAT|TBSTYLE_LIST|WS_VISIBLE, 
-		0, 0, 0, 0, p->Wnd, (HMENU)TOOLBAR_ID, p->Module, NULL); 
+
+
+		dwStyle = WS_CHILD | WS_VISIBLE | TBSTYLE_FLAT | TBSTYLE_LIST;
+		if ( p->MenuDef->Id == IF_FILE )
+		{
+			dwStyle = dwStyle | CCS_BOTTOM;
+		}
+
+		p->WndTB = CreateWindowEx(
+			0, 
+			TOOLBARCLASSNAME, 
+			(LPCTSTR) NULL, 
+	        dwStyle,
+			0, 0, 
+			0, 0, 
+			p->Wnd, 
+			(HMENU)TOOLBAR_ID, 
+			p->Module, 
+			NULL); 
 
 		if (p->WndTB)
 		{
 			SendMessage(p->WndTB, TB_BUTTONSTRUCTSIZE, (WPARAM) sizeof(TBBUTTON), 0); 
-
 			SendMessage(p->WndTB,TB_SETEXTENDEDSTYLE,0,TBSTYLE_EX_MIXEDBUTTONS);
 
 			OldToolBarProc = (WNDPROC) GetWindowLong(p->WndTB,GWL_WNDPROC);
@@ -769,8 +818,6 @@ static void CreateToolBar(win* p)
 
 			GetWindowRect(p->WndTB,&r);
 			p->ToolBarHeight = r.bottom - r.top;
-
-			AddMenu(p);
 		}
 	}
 }
@@ -1183,10 +1230,25 @@ static void WinControlUpdate(win* p,wincontrol* i)
 	p->InUpdate = 0;
 }
 
-winunit WinPixelToUnitX(win* p,int Pixel) {	return ScaleRound(Pixel,72,p->LogPixelSX); }
-winunit WinPixelToUnitY(win* p,int Pixel) { return ScaleRound(Pixel,72,p->LogPixelSY); }
-int WinUnitToPixelX(win* p,winunit Pos) { return ScaleRound(Pos,p->LogPixelSX,72); }
-int WinUnitToPixelY(win* p,winunit Pos) { return ScaleRound(Pos,p->LogPixelSY,72); }
+winunit WinPixelToUnitX(win* p,int Pixel) 
+{	
+	return ScaleRound(Pixel,72,p->LogPixelSX); 
+}
+
+winunit WinPixelToUnitY(win* p,int Pixel) 
+{
+	return ScaleRound(Pixel,72,p->LogPixelSY); 
+}
+
+int WinUnitToPixelX(win* p,winunit Pos) 
+{
+	return ScaleRound(Pos,p->LogPixelSX,72); 
+}
+
+int WinUnitToPixelY(win* p,winunit Pos) 
+{
+	return ScaleRound(Pos,p->LogPixelSY,72); 
+}
 
 void WinProp( win* p, int* x0,int* x1)
 {
@@ -1596,7 +1658,8 @@ void WinSetObject(HWND Wnd,win* p)
 
 void WinRegisterHotKey(win* p,int Id,int HotKey)
 {
-#if defined(NDEBUG) || defined(TARGET_WINCE)
+#if defined(TARGET_WINCE)
+//#if defined(NDEBUG) || defined(TARGET_WINCE)
 	int Mod = MOD_KEYUP;
 	HotKey &= ~HOTKEY_KEEP;
 	//if (WinNoHotKey(HotKey)) return; //don't force, some devices support those hotkeys
@@ -1699,12 +1762,18 @@ void WinEndUpdate(win* p)
 
 void WinMenuInsert(win* p,int No,int PrevId,int Id,const tchar_t* LockedMsg)
 {
+	if (p->SubMenu)
+		InsertMenu(p->SubMenu,PrevId,MF_BYCOMMAND|MF_STRING,Id,LockedMsg);
+
 	if (p->Menu2[No])
 		InsertMenu(p->Menu2[No],PrevId,MF_BYCOMMAND|MF_STRING,Id,LockedMsg);
 }
 
 bool_t WinMenuDelete(win* p,int No,int Id)
 {
+	if (p->SubMenu)
+		DeleteMenu(p->SubMenu,Id,MF_BYCOMMAND);
+
 	if (p->Menu2[No])
 		return DeleteMenu(p->Menu2[No],Id,MF_BYCOMMAND)!=0;
 	return 0;
@@ -1712,6 +1781,9 @@ bool_t WinMenuDelete(win* p,int No,int Id)
 
 bool_t WinMenuEnable(win* p,int No,int Id,bool_t State)
 {
+	if (p->SubMenu)
+		EnableMenuItem(p->SubMenu,Id,(State ? MF_ENABLED:MF_GRAYED)|MF_BYCOMMAND);
+
 	if (p->Menu2[No])
 		return EnableMenuItem(p->Menu2[No],Id,(State ? MF_ENABLED:MF_GRAYED)|MF_BYCOMMAND) != -1;
 	return 0;
@@ -1739,6 +1811,9 @@ int WinMenuFind(win* p,int Id)
 
 bool_t WinMenuCheck(win* p,int No,int Id,bool_t State)
 {
+	if (p->SubMenu)
+		CheckMenuItem(p->SubMenu,Id,State?MF_CHECKED:MF_UNCHECKED);
+
 	if (p->Menu2[No])
 		return CheckMenuItem(p->Menu2[No],Id,State?MF_CHECKED:MF_UNCHECKED) != -1;
 	return 0;
@@ -1786,6 +1861,7 @@ wincontrol* WinLabel(win* p,winunit* DlgTop,winunit DlgLeft,winunit DlgWidth,con
 
 	OldFont = SelectObject(DC,Font);
 
+	// TODO : 2byte Char
 	if (Msg)
 		while (*Msg)
 		{
@@ -1816,7 +1892,7 @@ wincontrol* WinLabel(win* p,winunit* DlgTop,winunit DlgLeft,winunit DlgWidth,con
 					if (!s[0] || !s[1] || Width<0 || Size.cx <= Width)
 						break;
 
-					i = tcsrchr(s,' ');
+					i = strrchr(s,' ');
 					if (i)
 						*i = 0;
 					else
@@ -2419,6 +2495,9 @@ static LRESULT CALLBACK Proc(HWND Wnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 		if (p->Proc)
 			p->Proc(p,MSG_PREPARE,0,0,&Result);
+
+		CreateMenuBar(p);
+		CreateSubMenu(p);
 		CreateToolBar(p);
 
 		SetWindowLong(Wnd,GWL_USERDATA,(LONG)p); // only after CreateToolBar (WM_MOVE)
@@ -2427,8 +2506,15 @@ static LRESULT CALLBACK Proc(HWND Wnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 		{
 			RECT r;
 			GetClientRect(p->Wnd,&r);
-			CreateWindow(DialogClass.lpszClassName,NULL,WS_CLIPCHILDREN|WS_CHILD|WS_VISIBLE,
-				0,p->ToolBarHeight,r.right,r.bottom-p->ToolBarHeight,p->Wnd,NULL,DialogClass.hInstance,p);
+			CreateWindow(
+				DialogClass.lpszClassName,
+				NULL,
+				WS_CLIPCHILDREN | WS_CHILD | WS_VISIBLE,
+				0, p->ToolBarHeight,
+				r.right, (r.bottom - p->ToolBarHeight),
+				p->Wnd,
+				NULL,
+				DialogClass.hInstance,p);
 		}
 
 		if (p->Init)
@@ -2473,8 +2559,12 @@ static LRESULT CALLBACK Proc(HWND Wnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 			RECT r;
 			GetClientRect(p->Wnd,&r);
 
-			if (p->ToolBarHeight)
-				MoveWindow(p->WndTB,0,0,r.right,p->ToolBarHeight,TRUE);
+			// Not call main window.
+			if ( p->MenuDef->Id != IF_FILE )
+			{
+				if (p->ToolBarHeight)
+					MoveWindow(p->WndTB,0,0,r.right,p->ToolBarHeight,TRUE);
+			}
 
 			if (p->WndDialog && !p->OwnDialogSize)
 				MoveWindow(p->WndDialog,0,p->ToolBarHeight,r.right,r.bottom-p->ToolBarHeight,TRUE);
@@ -2600,8 +2690,9 @@ static void HandleMessage(win* p,MSG* Msg)
 	}
 #endif
 
-	if (Msg->message >= WM_APP + 0x200 && 
-		Msg->message <= WM_APP + 0x220)
+	if ( (Msg->message >= WM_APP + 0x200 && 
+		  Msg->message <= WM_APP + 0x220) ||  
+       (  Msg->message == WM_DROPFILES ) )
 	{
 		// send to application window
 		win* Appl=p;
@@ -2720,13 +2811,27 @@ static int Popup(win* p,win* Parent)
 	}
 #else
 	Style |= WS_OVERLAPPEDWINDOW;
+//	Style |= WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 	y = x = CW_USEDEFAULT;
 	Width = WinUnitToPixelX(p,p->WinWidth);
 	Height = WinUnitToPixelY(p,p->WinHeight);
 #endif
 
-	Wnd = CreateWindowEx(ExStyle,WinClass.lpszClassName,LangStr(p->Node.Class,NODE_NAME),Style,x,y,Width,Height,
-		Parent?Parent->Wnd:NULL,NULL,WinClass.hInstance,p);
+	Wnd = CreateWindowEx(
+		ExStyle,
+		WinClass.lpszClassName,
+		LangStr(p->Node.Class,NODE_NAME),
+		Style,
+		x,y,
+		Width,Height,
+		Parent?Parent->Wnd:NULL,
+		NULL,
+		WinClass.hInstance,
+p);
+
+#if defined(TARGET_WIN32)
+	DragAcceptFiles(Wnd, 1);
+#endif
 
 	if (Wnd)
 	{
@@ -2746,6 +2851,7 @@ static int Popup(win* p,win* Parent)
 	}
 	
 	ThreadPriority(NULL,Priority);
+
 	return p->Result;
 }
 

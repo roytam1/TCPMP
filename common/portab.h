@@ -223,7 +223,8 @@ typedef char tchar_t;
 #define tcscmp strcmp
 #define tcsncmp strncmp
 #define tcschr strchr
-#define tcsrchr strrchr
+//#define tcsrchr strrchr
+#define tcsrchr(a,b) (tchar_t *)_mbsrchr((unsigned char *) a, (unsigned int) b)
 #define T(a) a
 #endif
 #endif
