@@ -33,6 +33,7 @@
 #include "playlst.h"
 #include "../skin.h"
 #include "../../config.h"
+#include "limits.h"
 
 #define CORETHEQUE_UI_ID			FOURCC('C','T','Q','U')
 
@@ -76,7 +77,7 @@
 #define TITLEHEIGHT		16
 #define TITLEFONT		11
 
-#define VOLMINWIDTH		35
+#define VOLMINWIDTH		50
 #define VOLTHUMB		12
 
 #define IF_AUDIO		50000
@@ -86,6 +87,9 @@
 #define IF_STREAM_AUDIO	54000
 #define IF_STREAM_VIDEO	55000
 #define IF_STREAM_SUBTITLE 56000
+
+// After Windows NT.
+#define WM_MOUSEWHEEL                   0x020A
 
 static int HotKey[] = 
 {
@@ -156,6 +160,19 @@ typedef struct intface
 	bool_t TrackBar;
 	bool_t TitleBar;
 	bool_t TaskBar;
+	bool_t ButtonBar;
+	bool_t MenuBar;
+	bool_t WinTitle;
+	bool_t TopMost;
+	int    WinWheelN;
+	int    WinWheelS;
+	int    WinWheelC;
+	int    WinPriority;
+	int    WinSaveShow;
+	int    WinSaveLeft;
+	int    WinSaveTop;
+	int    WinSaveWidth;
+	int    WinSaveHeight;
 	bool_t Buttons;
 	bool_t Focus;
 	bool_t Clipping;
@@ -260,7 +277,14 @@ static void ResizeVolume(intface* p)
 
 static bool_t Toggle(intface* p,int Param,int Force);
 static void UpdateVolume(intface* p);
+static int UpdateWinTitle(intface* p);
+static int UpdateWinPos(intface* p);
+static int SaveWinPos(intface* p);
+static int UpdateTopMost(intface* p);
+static int UpdateWinWheel(intface* p,int Cmd);
+static int UpdateWinPriority(intface* p,int Cmd);
 static void UpdateClipping(intface* p,bool_t Suggest,bool_t HotKey);
+static int Command(intface* p,int Cmd);
 
 static void ShowVol(intface* p,bool_t Show)
 {
@@ -317,6 +341,18 @@ static void Resize(intface* p)
 		if (Place.showCmd != SW_MAXIMIZE)
 #endif
 		{
+			SaveWinPos(p);
+			UpdateWinTitle(p);
+			UpdateTopMost(p);
+
+			if (p->MenuBar == 1 && p->Win.Menu3 != 0) {
+				SetMenu( p->Win.Wnd, p->Win.Menu3 );
+			}
+			else
+			{
+				SetMenu( p->Win.Wnd, NULL );
+			}
+
 			GetClientRect(p->Win.Wnd,&r);
 
 			if (r.right != p->ClientRect.right || r.bottom != p->ClientRect.bottom)
@@ -327,21 +363,7 @@ static void Resize(intface* p)
 				p->TitleHeight = 0;
 				p->ClientRect = r;
 
-				r.top += p->Win.ToolBarHeight;
-
-				if (p->WndTrack)
-				{
-					TrackHeight = WinUnitToPixelY(&p->Win,TRACKHEIGHT);
-					r.bottom -= TrackHeight;
-					MoveWindow(p->WndTrack,r.left,r.bottom,r.right,TrackHeight,TRUE);
-
-					TrackThumb = WinUnitToPixelY(&p->Win,TRACKTHUMB);
-					if (p->TrackThumb != TrackThumb)
-					{
-						p->TrackThumb = TrackThumb; // avoid calling this regulary because it shows the trackbar
-						SendMessage(p->WndTrack, TBM_SETTHUMBLENGTH,TrackThumb,0);
-					}
-				}
+//				r.top += p->Win.ToolBarHeight;
 
 				if (p->WndTitle)
 				{
@@ -361,19 +383,48 @@ static void Resize(intface* p)
 					}
 					else
 					{
-						if (p->Win.ToolBarHeight)
-						{
-							r.bottom -= p->TitleHeight;
-							MoveWindow(p->WndTitle,r.left,r.bottom,p->TitleWidth,p->TitleHeight,TRUE);
-						}
-						else
-						{
-							MoveWindow(p->WndTitle,r.left,r.top,p->TitleWidth,p->TitleHeight,TRUE);
-							r.top += p->TitleHeight;
-						}
+						r.bottom -= p->TitleHeight;
+						MoveWindow(p->WndTitle,r.left,r.bottom,p->TitleWidth,p->TitleHeight,TRUE);
+//						if (p->Win.ToolBarHeight)
+//						{
+//							r.bottom -= p->TitleHeight;
+//							MoveWindow(p->WndTitle,r.left,r.bottom,p->TitleWidth,p->TitleHeight,TRUE);
+//						}
+//						else
+//						{
+//							MoveWindow(p->WndTitle,r.left,r.top,p->TitleWidth,p->TitleHeight,TRUE);
+//							r.top += p->TitleHeight;
+//						}
 					}
+				}
 
-					p->TitleTop = (p->TitleHeight-WinUnitToPixelY(&p->Win,p->TitleFontSize))/2;
+				if (p->WndTrack)
+				{
+					TrackHeight = WinUnitToPixelY(&p->Win,TRACKHEIGHT);
+					r.bottom -= TrackHeight;
+					MoveWindow(p->WndTrack,r.left,r.bottom,r.right,TrackHeight,TRUE);
+					MoveWindow(p->WndTrack,r.left,r.bottom,r.right,TrackHeight,TRUE);
+
+					TrackThumb = WinUnitToPixelY(&p->Win,TRACKTHUMB);
+					if (p->TrackThumb != TrackThumb)
+					{
+						p->TrackThumb = TrackThumb; // avoid calling this regulary because it shows the trackbar
+						SendMessage(p->WndTrack, TBM_SETTHUMBLENGTH,TrackThumb,0);
+					}
+				}
+
+				if (p->Win.WndTB)
+				{
+					if ( p->ButtonBar == 1 ) {
+						r.bottom -= p->Win.ToolBarHeight;
+						MoveWindow(p->Win.WndTB,0,0,r.right,p->Win.ToolBarHeight,TRUE);
+						MoveWindow(p->Win.WndTB,0,r.bottom,r.right,p->Win.ToolBarHeight,TRUE);
+					}
+					else
+					{
+						MoveWindow(p->Win.WndTB,0,0,r.right,p->Win.ToolBarHeight,TRUE);
+						MoveWindow(p->Win.WndTB,0,-1 * p->Win.ToolBarHeight ,r.right,p->Win.ToolBarHeight,TRUE);
+					}
 				}
 
 				p->SkinArea.x = r.left;
@@ -409,6 +460,14 @@ static void Resize(intface* p)
 	}
 	else
 	{
+#ifdef NODEBUG
+		SetWindowPos(p->Win.Wnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
+#endif
+
+		if (p->Win.Menu3 != 0) {
+			SetMenu( p->Win.Wnd, 0 );
+		}
+
 		GetClientRect(p->Win.Wnd,&r);
 		p->Viewport.x = r.left + p->Offset.x;
 		p->Viewport.y = r.top + p->Offset.y;
@@ -695,6 +754,57 @@ static void UpdateMenuFrac(intface* p,int MenuId,int Param,int Num,int Den)
 	WinMenuCheck(&p->Win,1,MenuId,f.Num*Den==f.Den*Num);
 }
 
+static void  WinWheelCheck(intface* p);
+static void  WinWheelCheck(intface* p)
+{
+	int i;
+
+	for( i=1 ; i<=3 ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_N+i,0);
+
+	for( i=1 ; i<=3 ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_S+i,0);
+
+	for( i=1 ; i<=3 ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_C+i,0);
+
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_N+p->WinWheelN,1);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_S+p->WinWheelS,1);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_C+p->WinWheelC,1);
+
+}
+
+
+static void  WinPriorityCheck(intface* p);
+static void  WinPriorityCheck(intface* p)
+{
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_HIGH,0);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_AVOBENORMAL,0);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_NORMAL,0);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_BELOWNORMAL,0);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_IDLE,0);
+
+	switch (p->WinPriority)
+	{
+	case (1):
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_HIGH,1);
+		break;
+	case (2):
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_AVOBENORMAL,1);
+		break;
+	case (3):
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_NORMAL,1);
+		break;
+	case (4):
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_BELOWNORMAL,1);
+		break;
+	case (5):
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_PRIORITY_IDLE,1);
+		break;
+	}
+	
+}
+
 static void UpdateMenu(intface* p)
 {
 	packetformat PacketFormat;
@@ -828,6 +938,17 @@ static void UpdateMenu(intface* p)
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_TITLEBAR,p->TitleBar);
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_TRACKBAR,p->TrackBar);
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_TASKBAR,p->TaskBar);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_BUTTONBAR,p->ButtonBar);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_MENUBAR,p->MenuBar);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_VIEW_WINTITLE,p->WinTitle);
+
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_WINDOW_TOPMOST,p->TopMost);
+	
+	// Update Menu Priority
+	WinPriorityCheck(p);
+	
+	// Update Menu Wheel
+	WinWheelCheck(p);
 
 	//UpdateMenuInt(p,IF_OPTIONS_AUDIO_QUALITY_LOW,PLAYER_AUDIO_QUALITY,0);
 	//UpdateMenuInt(p,IF_OPTIONS_AUDIO_QUALITY_MEDIUM,PLAYER_AUDIO_QUALITY,1);
@@ -878,6 +999,7 @@ static void UpdateMenu(intface* p)
 
 	UpdateMenuBool(p,IF_OPTIONS_FULLSCREEN,PLAYER_FULLSCREEN);
 	UpdateMenuBool(p,IF_OPTIONS_REPEAT,PLAYER_REPEAT);
+	UpdateMenuBool(p,IF_OPTIONS_REPEATTRACK,PLAYER_REPEATTRACK);
 	UpdateMenuBool(p,IF_OPTIONS_SHUFFLE,PLAYER_SHUFFLE);
 
 	p->Equalizer->Get(p->Equalizer,EQUALIZER_ENABLED,&b,sizeof(b));
@@ -990,6 +1112,18 @@ static bool_t ToggleFullScreen(intface* p,int Force,int CoverArtFullScreen)
 			p->Player->Set(p->Player,PLAYER_UPDATEVIDEO,NULL,0);
 			RefreshButton(p,PLAYER_FULLSCREEN,&p->FullScreen,IF_OPTIONS_FULLSCREEN,-1,-1);
 		}
+
+		if (State)
+		{
+			while ( ShowCursor(0) > -1 ){;}
+		}
+		else
+		{
+			while ( ShowCursor(1) < 0 ){;}
+		}
+
+		p->ClientRect.right = -1;
+		Resize(p);
 	}
 	return State;
 }
@@ -1442,21 +1576,55 @@ static menudef MenuDef[] =
 {
 	{ 0,INTERFACE_ID, IF_FILE },
 	{ 1,INTERFACE_ID, IF_FILE_OPENFILE },
-	{ 1,INTERFACE_ID, IF_FILE_CORETHEQUE },
-	{ 1,INTERFACE_ID, IF_FILE_PLAYLIST },
+//	{ 1,INTERFACE_ID, IF_FILE_CORETHEQUE },
 	{ 1,-1,-1 },
-	{ 1,INTERFACE_ID, IF_PLAY },
-	{ 1,INTERFACE_ID, IF_NEXT },
-	{ 1,INTERFACE_ID, IF_PREV },
-	{ 1,-1,-1 },
-	{ 1,INTERFACE_ID, IF_FILE_CHAPTERS },
-	{ 2,INTERFACE_ID, IF_FILE_CHAPTERS_NONE },
-	{ 1,INTERFACE_ID, IF_FILE_MEDIAINFO },
 	{ 1,INTERFACE_ID, IF_FILE_BENCHMARK },
-	{ 1,INTERFACE_ID, IF_FILE_ABOUT },
 	{ 1,-1,-1 },
+//	{ 1,INTERFACE_ID, IF_PLAY },
 	{ 1,INTERFACE_ID, IF_FILE_EXIT },
-	{ 0,INTERFACE_ID, IF_OPTIONS },
+
+	// View
+	{ 0,INTERFACE_ID, IF_OPTIONS_VIEW },
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_WINTITLE }, 
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_MENUBAR }, 
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_BUTTONBAR }, 
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_TRACKBAR }, 
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_TITLEBAR },
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW_TASKBAR }, 
+	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW, MENU_SMALL },	
+	{ 2,INTERFACE_ID, IF_OPTIONS_ZOOM },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_SCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FILL_SCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_STRETCH_SCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_110 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_120 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_130 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_50 }, 
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_100 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_150 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_200 },
+	{ 2,INTERFACE_ID, IF_OPTIONS_ASPECT },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_AUTO },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_SQUARE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_SCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_NTSC },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_PAL },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_SCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_NTSC },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_PAL },
+	{ 2,INTERFACE_ID, IF_OPTIONS_ORIENTATION },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ORIENTATION_FULLSCREEN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_GUI },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_0 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_90 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_270 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_180 },
+	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_OPTIONS_WINDOW_TOPMOST }, 
+
+	// Play
+	{ 0,INTERFACE_ID, IF_VIEW },
 	{ 1,INTERFACE_ID, IF_OPTIONS_SPEED },
 	{ 2,INTERFACE_ID, IF_OPTIONS_SPEED_10 },
 	{ 2,INTERFACE_ID, IF_OPTIONS_SPEED_25 },
@@ -1468,50 +1636,10 @@ static menudef MenuDef[] =
 	{ 2,INTERFACE_ID, IF_OPTIONS_SPEED_120 },
 	{ 2,INTERFACE_ID, IF_OPTIONS_SPEED_150 },
 	{ 2,INTERFACE_ID, IF_OPTIONS_SPEED_200 },
-	{ 1,INTERFACE_ID, IF_OPTIONS_VIEW, MENU_SMALL },	
-	{ 2,INTERFACE_ID, IF_OPTIONS_ZOOM },
-#if !defined(SH3)
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_SCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FILL_SCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_STRETCH_SCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_110 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_120 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_FIT_130 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_50 }, 
-#endif
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_100 },
-#if !defined(SH3)
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_150 },
-#endif
-	{ 3,INTERFACE_ID, IF_OPTIONS_ZOOM_200 },
-#if !defined(SH3)
-	{ 2,INTERFACE_ID, IF_OPTIONS_ASPECT },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_AUTO },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_SQUARE },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_SCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_NTSC },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_4_3_PAL },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_SCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_NTSC },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ASPECT_16_9_PAL },
-#endif
-	{ 2,INTERFACE_ID, IF_OPTIONS_ORIENTATION },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ORIENTATION_FULLSCREEN },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_GUI },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_0 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_90 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_270 },
-	{ 3,INTERFACE_ID, IF_OPTIONS_ROTATE_180 },
-	{ 2,INTERFACE_ID, IF_OPTIONS_VIEW, MENU_NOTSMALL },	
-	{ 3,INTERFACE_ID, IF_OPTIONS_VIEW_TITLEBAR },
-	{ 3,INTERFACE_ID, IF_OPTIONS_VIEW_TRACKBAR }, 
-	{ 3,INTERFACE_ID, IF_OPTIONS_VIEW_TASKBAR }, 
 	{ 1,INTERFACE_ID, IF_OPTIONS_VIDEO },
-#if !defined(SH3) && !defined(MIPS)
 	{ 2,INTERFACE_ID, IF_OPTIONS_VIDEO_ZOOM_SMOOTH50 },
 	{ 2,INTERFACE_ID, IF_OPTIONS_VIDEO_ZOOM_SMOOTHALWAYS },
 	{ 2,INTERFACE_ID, IF_OPTIONS_VIDEO_DITHER },
-#endif
 	{ 2,INTERFACE_ID, IF_OPTIONS_VIDEO_QUALITY },
 	{ 3,INTERFACE_ID, IF_OPTIONS_VIDEO_QUALITY_LOWEST },
 	{ 3,INTERFACE_ID, IF_OPTIONS_VIDEO_QUALITY_LOW },
@@ -1550,6 +1678,8 @@ static menudef MenuDef[] =
 //!SUBTITLE	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_STREAM_NONE },
 
 	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_OPTIONS_REPEATTRACK },
+	{ 1,-1,-1 },
 	{ 1,INTERFACE_ID, IF_OPTIONS_REPEAT },
 	{ 1,INTERFACE_ID, IF_OPTIONS_SHUFFLE },
 	{ 1,INTERFACE_ID, IF_OPTIONS_EQUALIZER },
@@ -1557,8 +1687,49 @@ static menudef MenuDef[] =
 #if defined(CONFIG_SKIN)
 	{ 1,INTERFACE_ID, IF_OPTIONS_SKIN },
 #endif
+
+	// Control
+	{ 0,INTERFACE_ID, IF_CONTROL },
+	{ 1,INTERFACE_ID, IF_NEXT },
+	{ 1,INTERFACE_ID, IF_PREV },
+	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_FILE_CHAPTERS },
+	{ 2,INTERFACE_ID, IF_FILE_CHAPTERS_NONE },
+	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_FILE_PLAYLIST },
+
+	// Option
+	{ 0,INTERFACE_ID, IF_OPTIONS },
+	{ 1,INTERFACE_ID, IF_OPTIONS_PRIORITY },
+	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_HIGH },
+	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_AVOBENORMAL },
+	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_NORMAL }, 
+	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_BELOWNORMAL }, 
+	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_IDLE }, 
+	{ 1,INTERFACE_ID, IF_OPTIONS_WHEEL },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_NONE },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_VOL },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_SEEK },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_ZOOM },
+	{ 2,-1,-1 },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_S },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_VOL },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_SEEK },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_ZOOM },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_C },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_VOL },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_SEEK },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_ZOOM },
 	{ 1,-1,-1 },
 	{ 1,INTERFACE_ID, IF_OPTIONS_SETTINGS },
+
+	// Help
+	{ 0,INTERFACE_ID, IF_HELP },	
+	{ 1,INTERFACE_ID, IF_FILE_MEDIAINFO },
+	{ 1,-1,-1 },
+	{ 1,INTERFACE_ID, IF_FILE_ABOUT },
 
 	MENUDEF_END
 };
@@ -1571,12 +1742,16 @@ void CreateButtons(intface* p)
 		RECT r,rv;
 
 		WinBitmap(&p->Win,IDB_TOOLBAR16,IDB_TOOLBAR32,10);
-		WinAddButton(&p->Win,-1,-1,NULL,0);
+//		WinAddButton(&p->Win,-1,-1,NULL,0);
 		WinAddButton(&p->Win,IF_PLAY,0,NULL,1);
 		WinAddButton(&p->Win,IF_FASTFORWARD,4,NULL,1);
 		WinAddButton(&p->Win,IF_STOP,5,NULL,0);
 		WinAddButton(&p->Win,-1,-1,NULL,0);
+		WinAddButton(&p->Win,IF_PREV,11,NULL,0);
+		WinAddButton(&p->Win,IF_NEXT,10,NULL,0);
+		WinAddButton(&p->Win,-1,-1,NULL,0);
 		WinAddButton(&p->Win,IF_OPTIONS_FULLSCREEN,6,NULL,1);
+		WinAddButton(&p->Win,-1,-1,NULL,0);
 		WinAddButton(&p->Win,IF_OPTIONS_MUTE,7,NULL,1);
 
 		GetClientRect(p->Win.WndTB,&r);
@@ -1700,7 +1875,7 @@ static int UpdateTitleBar(intface* p,bool_t DoResize)
 			T("Time"),   
 			WS_CHILD | WS_VISIBLE, 
 			0, 0,    
-			200, 20,   
+			200, 20,
 			p->Win.Wnd,	
 			NULL,						
 			p->Win.Module,                     
@@ -1763,7 +1938,7 @@ static int UpdateTrackBar(intface* p,bool_t DoResize)
 			TRACKBAR_CLASS,       
 			T("Time"),   
 			WS_CHILD | WS_VISIBLE | 
-			TBS_HORZ|TBS_BOTH|TBS_NOTICKS|TBS_FIXEDLENGTH, 
+			TBS_HORZ | TBS_BOTH | TBS_NOTICKS | TBS_FIXEDLENGTH, 
 			0, 0,    
 			200, 20,   
 			p->Win.Wnd,	
@@ -1869,6 +2044,107 @@ static int UpdateTaskBar(intface* p)
 	return ERR_NONE;
 }
 
+static int UpdateButtonBar(intface* p)
+{
+	if (p->Win.WndTB != NULL) {
+		p->ClientRect.right = -1;
+		Resize(p);
+	}
+
+	return ERR_NONE;
+}
+
+static int UpdateWinTitle(intface* p)
+{
+	int Style;
+
+	if (p->Win.Wnd == NULL)
+		return ERR_NONE;
+
+	if(p->WinTitle == 0) 
+	{
+		Style = WS_VISIBLE | WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+	}
+	else
+	{
+		Style = GetWindowLong(p->Win.Wnd, GWL_STYLE);
+		if( Style == (Style | WS_OVERLAPPEDWINDOW) )
+			return ERR_NONE;
+		Style = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
+	}
+
+	SetWindowLong(p->Win.Wnd, GWL_STYLE, Style);
+	SetWindowPos(p->Win.Wnd,NULL,0,0,0,0,(SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED));
+
+	return ERR_NONE;
+}
+
+static int UpdateWinPos(intface* p)
+{
+
+	switch(p->WinSaveShow)
+	{
+	case (SW_MAXIMIZE):
+		ShowWindow(p->Win.Wnd, SW_MAXIMIZE);
+		break;
+	case (SW_MINIMIZE):
+		ShowWindow(p->Win.Wnd, SW_SHOWMINNOACTIVE);
+		break;
+	case (SW_SHOWNORMAL):
+	default:
+		MoveWindow(p->Win.Wnd,
+   				   p->WinSaveLeft, p->WinSaveTop,
+				   p->WinSaveWidth,p->WinSaveHeight,
+				   1);
+		break;
+	}
+	
+	return ERR_NONE;
+}
+
+static int SaveWinPos(intface* p)
+{
+	WINDOWPLACEMENT Place;
+	RECT r;
+
+	Place.length = sizeof(Place);
+	GetWindowPlacement(p->Win.Wnd,&Place);
+
+	switch(Place.showCmd)
+	{
+	case (SW_MAXIMIZE):
+		p->WinSaveShow = SW_MAXIMIZE;
+		break;
+	case (SW_SHOWMINNOACTIVE):
+		break;
+	case (SW_SHOWNORMAL):
+		p->WinSaveShow = SW_SHOWNORMAL;
+		GetWindowRect(p->Win.Wnd, &r);
+		p->WinSaveLeft = r.left;
+		p->WinSaveTop  = r.top;
+		p->WinSaveWidth  = r.right - r.left;
+		p->WinSaveHeight = r.bottom - r.top;
+		break;
+	}
+
+	return ERR_NONE;
+}
+
+static int UpdateMenuBar(intface* p)
+{
+	if(p->Win.Menu3 != NULL)
+	{
+		if (p->MenuBar == 0) {
+			SetMenu( p->Win.Wnd, NULL );
+		}
+		else
+		{
+			SetMenu( p->Win.Wnd, p->Win.Menu3 );
+		}
+	}
+return ERR_NONE;
+}
+
 static int UpdateSkin(intface* p,bool_t Others);
 static int UpdateSkinFile(intface* p)
 {
@@ -1878,6 +2154,184 @@ static int UpdateSkinFile(intface* p)
 		SkinLoad(p->Skin,p->Win.Wnd,p->SkinPath);
 		UpdateSkin(p,1);
 	}
+	return ERR_NONE;
+}
+
+static int MouseWheel(intface* p, uint32_t wParam, uint32_t lParam)
+{
+	bool_t wheel;
+	int    cmd;
+	short  hiword;
+	short  loword;
+
+	hiword = HIWORD(wParam);
+	loword = LOWORD(wParam);
+
+	switch(loword)
+	{
+	case MK_SHIFT:
+		cmd = p->WinWheelS;
+		break;
+	case MK_CONTROL:
+		cmd = p->WinWheelC;
+		break;
+	default:
+		cmd = p->WinWheelN;
+		break;
+	}
+
+	if (hiword > 0) 
+		wheel = 1;
+	else
+		wheel = 0;
+
+	switch(cmd) 
+	{
+	case IF_OPTIONS_WHEEL_NONE:
+		break;
+	case IF_OPTIONS_WHEEL_VOL:
+		if (wheel == 1)
+			Command(p, IF_OPTIONS_VOLUME_UP);
+		else
+			Command(p, IF_OPTIONS_VOLUME_DOWN);
+		break;
+	case IF_OPTIONS_WHEEL_SEEK:
+		if (wheel == 1)
+			Command(p, IF_MOVE_BACK);
+		else
+			Command(p, IF_MOVE_FFWD);
+		break;
+	case IF_OPTIONS_WHEEL_ZOOM:
+		if (wheel == 1)
+			Command(p, IF_OPTIONS_ZOOM_OUT);
+		else
+			Command(p, IF_OPTIONS_ZOOM_IN);
+		break;
+	default:
+		break;
+	}
+
+	return ERR_NONE;
+}
+
+static void DragFileOpen(intface* p, HDROP hdrop)
+{
+	player* Player;
+	int  n;
+	UINT i, iFiles;
+	char cPath[MAXPATH + 1];
+	DWORD attr;
+	OSVERSIONINFO osVer;
+
+	Player = (player*)Context()->Player;
+	iFiles = DragQueryFile(hdrop, (UINT)-1, NULL, 0);
+	if ( iFiles == (UINT)-1 ) return;
+
+	SetForegroundWindow(p->Win.Wnd);
+//	SetWindowPos(p->Win.Wnd,HWND_TOP,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOZORDER|SWP_FRAMECHANGED);
+
+//	b = 0;
+//	Player->Set(Player,PLAYER_PLAY,&b,sizeof(b));
+	n = 0;
+	Player->Get(Player, PLAYER_LIST_COUNT, &n, sizeof(n));
+	for( i = 0 ; i < iFiles ; i++ ) 
+	{
+		DragQueryFile(hdrop, i, cPath, sizeof(cPath));
+		attr = GetFileAttributes(cPath);
+		if (attr & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			n = PlayerAddDir(Player, n, cPath, NULL, 0, 0);
+		}else{
+			n = PlayerAdd(Player, n, cPath, NULL);
+		}
+	}
+	n = n - i;
+	Player->Set(Player, PLAYER_LIST_CURRENT, &n, sizeof(n));
+
+	//\‘¢‘Ì‚ÌƒTƒCƒY‚ð‹‚ß‚ÄdwOSVersionInfoSize‚ÉŠi”[
+	osVer.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+	GetVersionEx(&osVer);
+
+	if( ! (osVer.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS) )
+	{
+		DragFinish(hdrop);
+	}
+
+}
+
+static int UpdateTopMost(intface* p)
+{
+	HWND hwnd;
+
+	if (p->Win.Wnd == NULL)
+		return ERR_NONE;
+
+	if (p->TopMost == 0)
+	{
+		hwnd = HWND_NOTOPMOST;
+	}
+	else
+	{
+		hwnd = HWND_TOPMOST;
+	}
+
+	SetWindowPos(p->Win.Wnd, hwnd, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE);
+
+	return ERR_NONE;
+}
+
+static int UpdateWinWheel(intface* p,int Cmd)
+{
+
+	if ( Cmd >= IF_OPTIONS_WHEEL_N && Cmd <= IF_OPTIONS_WHEEL_N + 0x0F )
+	{
+		p->WinWheelN = Cmd - IF_OPTIONS_WHEEL_N;
+	}
+	else if ( Cmd >= IF_OPTIONS_WHEEL_S && Cmd <= IF_OPTIONS_WHEEL_S + 0x0F )
+	{
+		p->WinWheelS = Cmd - IF_OPTIONS_WHEEL_S;
+	}
+	else if ( Cmd >= IF_OPTIONS_WHEEL_C && Cmd <= IF_OPTIONS_WHEEL_C + 0x0F )
+	{
+		p->WinWheelC = Cmd - IF_OPTIONS_WHEEL_C;
+	}
+
+	return ERR_NONE;
+
+}
+
+static int UpdateWinPriority(intface* p,int Cmd)
+{
+	HANDLE hProcess;
+
+	hProcess = GetCurrentProcess();
+
+	if (Cmd != 0)
+		p->WinPriority = Cmd - IF_OPTIONS_PRIORITY;
+
+	switch (p->WinPriority)
+	{
+	case (1):
+		SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS);
+		break;
+	case (2):
+		SetPriorityClass(hProcess, ABOVE_NORMAL_PRIORITY_CLASS);
+		break;
+	case (3):
+		SetPriorityClass(hProcess, NORMAL_PRIORITY_CLASS);
+		break;
+	case (4):
+		SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS);
+		break;
+	case (5):
+		SetPriorityClass(hProcess, IDLE_PRIORITY_CLASS);
+		break;
+	default:
+		p->WinPriority = IF_OPTIONS_PRIORITY_NORMAL - IF_OPTIONS_PRIORITY;
+		SetPriorityClass(hProcess, NORMAL_PRIORITY_CLASS);
+		break;
+	}
+
 	return ERR_NONE;
 }
 
@@ -2108,12 +2562,18 @@ static int Command(intface* p,int Cmd)
 
 	case IF_FILE_EXIT:
 		// just to be sure to stop overlay update (WM_DESTROY comes after window is hidden)
+		while ( ShowCursor(1) < 0 ){;}
+
 		BeforeExit(p);
 		DestroyWindow(p->Win.Wnd);
 		break;
 
 	case IF_OPTIONS_REPEAT:
 		Toggle(p,PLAYER_REPEAT,-1);
+		break;
+
+	case IF_OPTIONS_REPEATTRACK:
+		Toggle(p,PLAYER_REPEATTRACK,-1);
 		break;
 
 	case IF_OPTIONS_SHUFFLE:
@@ -2296,9 +2756,29 @@ static int Command(intface* p,int Cmd)
 		UpdateTaskBar(p);
 		break;
 
+	case IF_OPTIONS_VIEW_WINTITLE:
+		p->WinTitle = !p->WinTitle;
+		UpdateWinTitle(p);
+		break;
+
+	case IF_OPTIONS_VIEW_MENUBAR:
+		p->MenuBar = !p->MenuBar;
+		UpdateMenuBar(p);
+		break;
+
+	case IF_OPTIONS_VIEW_BUTTONBAR:
+		p->ButtonBar = !p->ButtonBar;
+		UpdateButtonBar(p);
+		break;
+
 	case IF_OPTIONS_VIEW_TRACKBAR:
 		p->TrackBar = !p->TrackBar;
 		UpdateTrackBar(p,1);
+		break;
+
+	case IF_OPTIONS_WINDOW_TOPMOST:
+		p->TopMost = !p->TopMost;
+		UpdateTopMost(p);
 		break;
 
 	case IF_OPTIONS_ZOOM_50:
@@ -2437,6 +2917,30 @@ static int Command(intface* p,int Cmd)
 		p->Player->Set(p->Player,PLAYER_RESYNC,NULL,0);
 		break;
 
+		
+	case IF_OPTIONS_WHEEL_N_NONE:
+	case IF_OPTIONS_WHEEL_S_NONE:
+	case IF_OPTIONS_WHEEL_C_NONE:
+	case IF_OPTIONS_WHEEL_N_VOL:
+	case IF_OPTIONS_WHEEL_S_VOL:
+	case IF_OPTIONS_WHEEL_C_VOL:
+	case IF_OPTIONS_WHEEL_N_SEEK:
+	case IF_OPTIONS_WHEEL_S_SEEK:
+	case IF_OPTIONS_WHEEL_C_SEEK:
+	case IF_OPTIONS_WHEEL_N_ZOOM:
+	case IF_OPTIONS_WHEEL_S_ZOOM:
+	case IF_OPTIONS_WHEEL_C_ZOOM:
+		UpdateWinWheel(p, Cmd);
+		break;
+
+	case IF_OPTIONS_PRIORITY_HIGH:
+	case IF_OPTIONS_PRIORITY_AVOBENORMAL:
+	case IF_OPTIONS_PRIORITY_NORMAL:
+	case IF_OPTIONS_PRIORITY_BELOWNORMAL:
+	case IF_OPTIONS_PRIORITY_IDLE:
+		UpdateWinPriority(p, Cmd);
+		break;
+	
 	case IF_OPTIONS_SPEED_10:
 		f.Num = 1;
 		f.Den = 10;
@@ -2587,7 +3091,8 @@ static int PlayerNotify(intface* p,int Id,int Value)
 	else
 	if (Id == PLAYER_PERCENT)
 	{
-		if (!p->Win.FullScreen && !p->Bench && (!p->InSeek || !p->Capture))
+//		if (!p->Win.FullScreen && !p->Bench && (!p->InSeek || !p->Capture))
+		if (!p->Bench && (!p->InSeek || !p->Capture))
 			PostMessage(p->Win.Wnd,MSG_PLAYER,PLAYER_PERCENT,Value);
 	}
 	else
@@ -2646,6 +3151,82 @@ static NOINLINE void UpdatePosition(intface* p)
 {
 	UpdateTrackPos(p);
 	UpdateTitleTime(p);
+}
+
+static void PopupSubMenu(intface* p, uint32_t wParam, uint32_t lParam);
+
+static void PopupSubMenu(intface* p, uint32_t wParam, uint32_t lParam)
+{
+	POINT po;
+	HMENU  hMenu;
+
+	hMenu = p->Win.SubMenu;
+
+	po.x = LOWORD(lParam);
+	po.y = HIWORD(lParam);
+	ClientToScreen(p->Win.Wnd, &po);
+
+	TrackPopupMenu(hMenu,
+		           TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+				   po.x,
+				   po.y,
+				   0,
+				   p->Win.Wnd,
+				   NULL);
+
+	return;
+}
+
+static void ShowTrackBar(intface* p, uint32_t wParam, uint32_t lParam);
+static void ShowTrackBar(intface* p, uint32_t wParam, uint32_t lParam)
+{
+	RECT r;
+	POINT po;
+	int TrackThumb;
+	int TrackHeight;
+
+	if (!p->WndTrack) {
+		return;
+	}
+
+	GetClientRect(p->Win.Wnd,&r);
+
+	po.x = LOWORD(lParam);
+	po.y = HIWORD(lParam);
+	ClientToScreen(p->Win.Wnd, &po);
+
+	p->Offset.x = 0;
+	p->Offset.y = 0;
+	ClientToScreen(p->Win.Wnd,&p->Offset);
+
+	TrackHeight = WinUnitToPixelY(&p->Win,TRACKHEIGHT);
+
+	if (po.y >= r.bottom - TrackHeight * 2)
+	{
+		ShowWindow(p->WndTrack,SW_SHOWNA);
+		while ( ShowCursor(1) < 0 ){;}
+
+		r.bottom -= TrackHeight;
+
+		MoveWindow(p->WndTrack, r.left, r.bottom, r.right, TrackHeight, TRUE);
+
+		TrackThumb = WinUnitToPixelY(&p->Win,TRACKTHUMB);
+		if (p->TrackThumb != TrackThumb)
+		{
+			p->TrackThumb = TrackThumb; // avoid calling this regulary because it shows the trackbar
+			SendMessage(p->WndTrack, TBM_SETTHUMBLENGTH,TrackThumb,0);
+		}
+
+		p->Player->Set(p->Player,PLAYER_UPDATEVIDEO,NULL,0);
+	}
+	else
+	{
+		while ( ShowCursor(0) > -1 ){;}
+		MoveWindow(p->WndTrack, r.left, -1 * TrackHeight, r.right, TrackHeight, TRUE);
+	}
+
+
+	return;
 }
 
 static const int SkinCmd[MAX_SKINITEM] =
@@ -2736,7 +3317,8 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		if (wParam == TIMER_SLIDERINVOL)
 			UpdateVol(p);
 
-		if (wParam == TIMER_SLIDERINSEEK && !p->Win.FullScreen)
+//		if (wParam == TIMER_SLIDERINSEEK && !p->Win.FullScreen)
+		if (wParam == TIMER_SLIDERINSEEK)
 			UpdatePosition(p);
 
 		if (wParam == TIMER_KEYINSEEK)
@@ -2805,9 +3387,13 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		return 1;
 	
 	case WM_MOUSEMOVE:
-		if (p->InSkin>0 && (wParam & MK_LBUTTON))
-			SkinMouse(&p->Skin[p->SkinNo],p->InSkin,(int16_t)LOWORD(lParam)-p->SkinArea.x,(int16_t)HIWORD(lParam)-p->SkinArea.y,p->Player,NULL,p->Win.Wnd,&p->SkinArea);
-		return 0;
+//		if (p->InSkin>0 && (wParam & MK_LBUTTON))
+//			SkinMouse(&p->Skin[p->SkinNo],p->InSkin,(int16_t)LOWORD(lParam)-p->SkinArea.x,(int16_t)HIWORD(lParam)-p->SkinArea.y,p->Player,NULL,p->Win.Wnd,&p->SkinArea);
+		if (p->FullScreen)
+		{
+			ShowTrackBar(p, wParam, lParam);
+		}
+		return 1;
 
 	case WM_LBUTTONUP:
 		if (p->InSkin>0)
@@ -2833,9 +3419,18 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		*Result = 0;
 		return 1;
 
-	case WM_LBUTTONDBLCLK:
 	case WM_LBUTTONDOWN:
-		DEBUG_MSG(DEBUG_WIN,T("LBUTTON"));
+
+		if (!p->FullScreen)
+		{
+			if (p->Player->Get(p->Player,PLAYER_SINGLECLICKFULLSCREEN,&b,sizeof(b))==ERR_NONE && !b)
+			{
+				SendMessageA(p->Win.Wnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+				return 1;
+			}
+		}
+
+	case WM_LBUTTONDBLCLK:
 		if ((wParam & MK_LBUTTON) && p->Focus)
 		{
 			tchar_t URL[MAXPATH];
@@ -2861,11 +3456,16 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 				if (p->Player->Get(p->Player,PLAYER_SINGLECLICKFULLSCREEN,&b,sizeof(b))==ERR_NONE && !b)
 				{
 					if (Msg == WM_LBUTTONDBLCLK)
+					{
 						PostMessage(p->Win.Wnd,WM_COMMAND,IF_OPTIONS_FULLSCREEN,0);
-					PostMessage(p->Win.Wnd,WM_COMMAND,IF_PLAY,0);
+					}
+					else
+					{
+//						PostMessage(p->Win.Wnd,WM_COMMAND,IF_PLAY,0);
+					}
 				}
 				else
-					PostMessage(p->Win.Wnd,WM_COMMAND,IF_PLAY_FULLSCREEN,0);
+					PostMessage(p->Win.Wnd,WM_COMMAND,IF_OPTIONS_FULLSCREEN,0);
 			}
 		}
 		SetForegroundWindow(p->Win.Wnd); //sometimes wince suck (triple click in opendialog)
@@ -2892,15 +3492,23 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		break;
 
 	case WM_SIZE:
-#ifdef MAXIMIZE_FULLSCREEN
-		if (wParam == SIZE_MAXIMIZED)
+		switch(wParam)
 		{
-			ShowWindow(p->Win.Wnd,SW_SHOWNORMAL);
-			ToggleFullScreen(p,1,1);
-		}
-		else
-#endif
+		case SIZE_MAXIMIZED:
+		case SIZE_MINIMIZED:
+			SaveWinPos(p);
+			break;
+		default:
+			if (p->WinSaveShow == SW_MAXIMIZE ||
+				p->WinSaveShow == SW_SHOWMINNOACTIVE)
+			{
+				p->WinSaveShow = SW_SHOWNORMAL;
+				UpdateWinPos(p);
+			}
+			// in SaveWinPos(p);
 			Resize(p);
+			break;
+		}
 		break;
 
 	case WM_SETFOCUS:
@@ -3035,6 +3643,24 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		ProcessCmdLine(p,(const tchar_t*)((COPYDATASTRUCT*)lParam)->lpData);
 		return 1;
 
+	case WM_RBUTTONUP:
+		if(p->FullScreen)
+			while ( ShowCursor(1) < 0 ){;}
+
+		PopupSubMenu(p, wParam, lParam);
+
+		if(p->FullScreen)
+			while ( ShowCursor(0) > -1 ){;}
+		break;
+
+	case WM_MOUSEWHEEL:
+		MouseWheel(p, wParam, lParam);
+		break;
+	
+	case WM_DROPFILES:
+		DragFileOpen(p, (HDROP)wParam);
+		break;
+
 	case MSG_INIT:
 		SetForegroundWindow(p->Win.Wnd);
 		if (Context()->CmdLine[0] || NodeRegLoadValue(0,REG_INITING,&i,sizeof(i),TYPE_INT))
@@ -3105,6 +3731,8 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 
 		SkinLoad(p->Skin,p->Win.Wnd,p->SkinPath);
 
+		UpdateWinPos(p);
+
 		if (!p->Skin[0].Valid)
 			CreateButtons(p);
 		UpdateSkin(p,0);
@@ -3118,6 +3746,7 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 		PostMessage(p->Win.Wnd,MSG_INIT,0,0);
 
 		UpdateHotKey(p,1,0);
+
 		break;
 	}
 
@@ -3129,8 +3758,21 @@ static const datatable Params[] =
 	{ IF_TITLEBAR,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
 	{ IF_TRACKBAR,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
 	{ IF_TASKBAR,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
-	{ IF_SKINNO,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
-	{ IF_SKINPATH,			TYPE_STRING,DF_SETUP|DF_HIDDEN },
+	{ IF_BUTTONBAR,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
+	{ IF_MENUBAR,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
+	{ IF_WINTITLE,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
+	{ IF_TOPMOST,			TYPE_BOOL, DF_SETUP|DF_HIDDEN },
+	{ IF_WHEEL_N,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WHEEL_S,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WHEEL_C,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINPRIORITY,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINSAVESHOW,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINSAVELEFT,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINSAVETOP,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINSAVEWIDTH,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_WINSAVEHEIGHT,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
+//	{ IF_SKINNO,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
+//	{ IF_SKINPATH,			TYPE_STRING,DF_SETUP|DF_HIDDEN },
 #if defined(TARGET_WINCE)
 	{ IF_ALLKEYS,			TYPE_BOOL, DF_SETUP|DF_CHECKLIST },
 #endif
@@ -3177,8 +3819,21 @@ static int Get(intface* p,int No,void* Data,int Size)
 	case IF_TRACKBAR: GETVALUE(p->TrackBar,bool_t); break;
 	case IF_TITLEBAR: GETVALUE(p->TitleBar,bool_t); break;
 	case IF_TASKBAR: GETVALUE(p->TaskBar,bool_t); break;
-	case IF_SKINNO: GETVALUE(p->SkinNo,int); break;
-	case IF_SKINPATH: GETSTRING(p->SkinPath); break;
+	case IF_BUTTONBAR: GETVALUE(p->ButtonBar,bool_t); break;
+	case IF_MENUBAR: GETVALUE(p->MenuBar,bool_t); break;
+	case IF_WINTITLE: GETVALUE(p->WinTitle,bool_t); break;
+	case IF_TOPMOST: GETVALUE(p->TopMost,bool_t); break;
+	case IF_WHEEL_N: GETVALUE(p->WinWheelN,int); break;
+	case IF_WHEEL_S: GETVALUE(p->WinWheelS,int); break;
+	case IF_WHEEL_C: GETVALUE(p->WinWheelC,int); break;
+	case IF_WINPRIORITY: GETVALUE(p->WinPriority,int); break;
+	case IF_WINSAVESHOW: GETVALUE(p->WinSaveShow,int); break;
+	case IF_WINSAVELEFT: GETVALUE(p->WinSaveLeft,int); break;
+	case IF_WINSAVETOP: GETVALUE(p->WinSaveTop,int); break;
+	case IF_WINSAVEWIDTH: GETVALUE(p->WinSaveWidth,int); break;
+	case IF_WINSAVEHEIGHT: GETVALUE(p->WinSaveHeight,int); break;
+//	case IF_SKINNO: GETVALUE(p->SkinNo,int); break;
+//	case IF_SKINPATH: GETSTRING(p->SkinPath); break;
 	case IF_ALLKEYS: GETVALUE(p->AllKeys,bool_t); break;
 	}
 	return Result;
@@ -3204,6 +3859,7 @@ static int UpdateSkin(intface* p,bool_t Others)
 		Resize(p);
 	}
 	RefreshButton(p,PLAYER_REPEAT,NULL,0,0,0);
+	RefreshButton(p,PLAYER_REPEATTRACK,NULL,0,0,0);
 	RefreshButton(p,PLAYER_PLAY,NULL,0,0,0);
 	RefreshButton(p,PLAYER_FFWD,NULL,0,0,0);
 	RefreshButton(p,PLAYER_MUTE,NULL,0,0,0);
@@ -3283,8 +3939,21 @@ static int Set(intface* p,int No,const void* Data,int Size)
 	case IF_TRACKBAR: SETVALUE(p->TrackBar,bool_t,UpdateTrackBar(p,1)); break;
 	case IF_TITLEBAR: SETVALUE(p->TitleBar,bool_t,UpdateTitleBar(p,1)); break;
 	case IF_TASKBAR: SETVALUE(p->TaskBar,bool_t,UpdateTaskBar(p)); break;
-	case IF_SKINNO: SETVALUE(p->SkinNo,int,UpdateSkin(p,1)); break;
-	case IF_SKINPATH: SETSTRING(p->SkinPath); Result = UpdateSkinFile(p); break;
+	case IF_BUTTONBAR: SETVALUE(p->ButtonBar,bool_t,UpdateButtonBar(p)); break;
+	case IF_MENUBAR: SETVALUE(p->MenuBar,bool_t,UpdateMenuBar(p)); break;
+	case IF_WINTITLE: SETVALUE(p->WinTitle,bool_t,UpdateWinTitle(p)); break;
+	case IF_TOPMOST: SETVALUE(p->TopMost,bool_t,UpdateTopMost(p)); break;
+	case IF_WHEEL_N: SETVALUE(p->WinWheelN,int,ERR_NONE); break;
+	case IF_WHEEL_S: SETVALUE(p->WinWheelS,int,ERR_NONE); break;
+	case IF_WHEEL_C: SETVALUE(p->WinWheelC,int,ERR_NONE); break;
+	case IF_WINPRIORITY: SETVALUE(p->WinPriority,int,UpdateWinPriority(p, 0)); break;
+	case IF_WINSAVESHOW: SETVALUE(p->WinSaveShow,int,ERR_NONE); break;
+	case IF_WINSAVELEFT: SETVALUE(p->WinSaveLeft,int,ERR_NONE); break;
+	case IF_WINSAVETOP: SETVALUE(p->WinSaveTop,int,ERR_NONE); break;
+	case IF_WINSAVEWIDTH: SETVALUE(p->WinSaveWidth,int,ERR_NONE); break;
+	case IF_WINSAVEHEIGHT: SETVALUE(p->WinSaveHeight,int,ERR_NONE); break;
+//	case IF_SKINNO: SETVALUE(p->SkinNo,int,UpdateSkin(p,1)); break;
+//	case IF_SKINPATH: SETSTRING(p->SkinPath); Result = UpdateSkinFile(p); break;
 	case IF_ALLKEYS: SETVALUECMP(p->AllKeys,bool_t,UpdateAllKeys(p),EqBool); break;
 	}
 	return Result;
@@ -3314,10 +3983,24 @@ static int Create(intface* p)
 	p->Win.Node.Get = Get;
 	p->Win.Node.Set = Set;
 
+	p->WinTitle = 1;
+	p->MenuBar = 1;
+	p->ButtonBar = 1;
 	p->Vol = -1;
-	p->TaskBar = 1;
 	p->TitleBar = 1;
 	p->TrackBar = 1;
+	p->TaskBar = 1;
+
+	p->WinWheelN = 2;
+	p->WinWheelS = 1;
+	p->WinWheelC = 1;
+
+	p->WinPriority = IF_OPTIONS_PRIORITY_NORMAL - IF_OPTIONS_PRIORITY;
+
+	p->TopMost = 0;
+	p->WinSaveWidth = 360;
+	p->WinSaveHeight = 240;
+
 	p->MenuPreAmp = -1;
 	p->MenuStreams = 0;
 	p->MenuAStream = -1;

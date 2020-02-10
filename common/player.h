@@ -35,6 +35,8 @@
 #define PLAYER_MICRODRIVE	0x21
 // repeat (bool_t)
 #define PLAYER_REPEAT		0x22
+// repeat track (bool_t)
+#define PLAYER_REPEATTRACK  0x26
 // shuffle (bool_t)
 #define PLAYER_SHUFFLE		0x23
 // start play after open (bool_t)

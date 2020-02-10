@@ -52,6 +52,7 @@ struct wincontrol
 	void* WndTB;																		\
 	void* Menu2[2];																		\
 	void* Menu3;																		\
+	void* SubMenu;																		\
 	void* Module;																		\
 	winunit Width;																		\
 	winunit Height;																		\

@@ -2560,8 +2560,6 @@ static int NextPrev(player_base* p,int Dir,bool_t StopIfEnd,bool_t NotTheSame)
 		int Index = FindCurrentIndex(p);
 		int Tries;
 	
-		// TODO
-		// track repeat
 		if (StopIfEnd && p->RepeatTrack)
 		{
 			Load(p,1,0,0);
