@@ -357,6 +357,7 @@ INTF0242=Taskbar
 INTF0249=Buttonbar
 INTF025A=Menu
 INTF025B=Window Title
+INTF025C=Window Top Most
 INTF018B=Video Driver:
 INTF018C=Audio Driver:
 INTF00E7=%s Decoder

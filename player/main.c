@@ -23,7 +23,11 @@
 
 #include "../common/common.h"
 
-static const tchar_t ProgramName[] = T("TCPMP");
+#ifdef NDEBUG
+static const tchar_t ProgramName[] = T("TCPMP mod");
+#else
+static const tchar_t ProgramName[] = T("TCPMP debug");
+#endif
 static const tchar_t ProgramVersion[] = 
 #include "../version"
 ;

@@ -5,13 +5,17 @@ The Core Pocket Media Player 0.72RC1 mod
   Win32用にI/Fを中心に改造してます。
 
 -- 構成 --
-  src　      tcpmp.src.0.72RC1.tar.bz2から修正したソースファイル
-  tcpmp-mod  modのバイナリファイル
+  /src　              tcpmp.src.0.72RC1.tar.bz2から修正したソースファイル
+  /tcpmp-mod          modのバイナリファイル
+  config-org2mod.vbs  オリジナル版からmodへの設定移行スクリプト
+  readme-mod.txt      このファイル
 
 -- インストール --
   (1) tcpmp.win32.0.72RC1.zip をインストール
   (2) language.tgzを削除
   (3) modを上書き
+  (4) config-org2mod.vbsを実行し、オリジナル版の設定を移行
+      一度行えば、2回目以降の実行は不要
 
 -- 開発環境 --
   Visual C++ 2005 Express Edition SP1
@@ -19,6 +23,18 @@ The Core Pocket Media Player 0.72RC1 mod
   YASM 0.8.0
 
 -- 修正履歴 --
+ 2009/05/20  0.72RC1 mod 2
+    - タイトルバー表示を「TCPMP」から「TCPMP mod」に変更した。
+    - レジストリの保存場所をオリジナルから分けた。
+      保存場所は「HKEY_CURRENT_USER\Software\TCPMP」から
+      「HKEY_CURRENT_USER\Software\TCPMP mod」に変更した。
+      オリジナル版との共存が可能になった。
+    - オプションに最前面表示機能追加。
+    - フルスクリーン時には常に最前面になるようにした。
+    - フルスクリーン時にはカーソルが消えるようにした。
+    - 終了時のサイズと位置、最大化状態を保持するようにした。
+    - 最大化した後で元に戻しても元のサイズに戻らない問題を修正。
+
  2009/05/17  0.72RC1 mod 1
     - GUIをMPCっぽくし、メニュー部とボタン部を分けた。
     - 再生オプションを追加変更。
@@ -34,4 +50,10 @@ The Core Pocket Media Player 0.72RC1 mod
     - 他画面からTCPMPのキーが効いてしまう問題を修正。
     - 「ソ」や「神」等の文字にある暫定的対応。
     - ダブルクリックによるフルスクリーン化で再生が
-      開始/再生される問題を修正。
+      開始/停止される問題を修正。
+
+-- ライセンス --
+GPL
+
+-- 作成者 --
+by ss.

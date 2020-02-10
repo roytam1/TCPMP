@@ -120,7 +120,7 @@ void Interface_Done();
 #define IF_OPTIONS_VIEW_BUTTONBAR		0x249
 #define IF_OPTIONS_VIEW_MENUBAR			0x25A
 #define IF_OPTIONS_VIEW_WINTITLE		0x25B
-#define IF_OPTIONS_VIEW					0x20E
+#define IF_OPTIONS_WINDOW_TOPMOST 		0x25C
 #define IF_OPTIONS_ASPECT				0x20F
 #define IF_OPTIONS_ASPECT_SQUARE		0x210
 #define IF_OPTIONS_ASPECT_4_3_PAL		0x211
@@ -179,6 +179,14 @@ void Interface_Done();
 #define IF_BUTTONBAR					0x303
 #define IF_MENUBAR						0x304
 #define IF_WINTITLE						0x305
+
+#define IF_TOPMOST						0x310
+
+#define IF_WINSAVESHOW					0x320
+#define IF_WINSAVELEFT					0x321
+#define IF_WINSAVETOP					0x322
+#define IF_WINSAVEWIDTH					0x323
+#define IF_WINSAVEHEIGHT				0x324
 
 #define IF_SKINPATH						0x503
 #define IF_SKINNO						0x500

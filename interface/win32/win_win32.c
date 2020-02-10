@@ -2811,7 +2811,6 @@ static int Popup(win* p,win* Parent)
 	}
 #else
 	Style |= WS_OVERLAPPEDWINDOW;
-//	Style |= WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 	y = x = CW_USEDEFAULT;
 	Width = WinUnitToPixelX(p,p->WinWidth);
 	Height = WinUnitToPixelY(p,p->WinHeight);
@@ -2829,9 +2828,10 @@ static int Popup(win* p,win* Parent)
 		WinClass.hInstance,
 p);
 
-#if defined(TARGET_WIN32)
+//	if(Parent == NULL) 
+//	{
+//	}
 	DragAcceptFiles(Wnd, 1);
-#endif
 
 	if (Wnd)
 	{
