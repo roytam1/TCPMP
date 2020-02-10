@@ -33,6 +33,8 @@
 #endif
 #include <windows.h>
 
+/*modify*/#include "overlay_subtitle.h"
+
 typedef struct gdi
 {
 	overlay p;
@@ -49,6 +51,7 @@ typedef struct gdi
 	planes Planes2;
 #endif
 
+	/*modify*/node *s;
 } gdi;
 
 static int AllocBitmap(gdi* p)
@@ -166,6 +169,7 @@ static int Init(gdi* p)
 	ReleaseDC(NULL,DC);
 
 	p->p.ClearFX = BLITFX_ONLYDIFF;
+	/*modify*/p->s = NodeEnumObject(0,SUBT_ID);
 	return ERR_NONE;
 }
 
@@ -184,6 +188,7 @@ static int Update(gdi* p)
 	int OldWidth = p->Overlay.Width;
 	int OldHeight = p->Overlay.Height;
 
+	/*modify*/if(p->s) RedrawSubtitle(p->s);
 	VirtToPhy(&p->p.Viewport,&p->p.DstAlignedRect,&p->p.Output.Format.Video);
 	VirtToPhy(NULL,&p->p.SrcAlignedRect,&p->p.Input.Format.Video);
 
@@ -260,7 +265,19 @@ static int Blit(gdi* p, const constplanes Data, const constplanes DataLast )
 	BlitImage(p->Soft2,p->Planes2,Data,DataLast,-1,-1);
 	BlitImage(p->p.Soft,p->Planes,p->Planes2,NULL,-1,-1);
 #else
-	BlitImage(p->p.Soft,p->Planes,Data,DataLast,-1,-1);
+	/*modify*/
+	if(p->s){
+		GetSubtitlePos(p->s, p->p.LastTime);
+		DrawSubtitle(p->s, &(p->p), SUBTITLE_GDI, -1);
+		BlitImage(p->p.Soft,p->Planes,Data,DataLast,-1,-1);
+
+		BlitSubtitle(p->s,p->Planes[0]);
+	} else {
+		BlitImage(p->p.Soft,p->Planes,Data,DataLast,-1,-1);
+	}
+	/*modify end*/
+	
+	//BlitImage(p->p.Soft,p->Planes,Data,DataLast,-1,-1);
 #endif
 
 	if (!p->DIBSection)
@@ -295,6 +312,7 @@ static int Create(gdi* p)
 	p->p.Blit = Blit;
 	p->p.Update = Update;
 	p->p.Reset = Reset;
+	/*modify*/p->s = NULL;
 	return ERR_NONE;
 }
 

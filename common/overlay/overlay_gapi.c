@@ -30,6 +30,7 @@
 #define STRICT
 #endif
 #include <windows.h>
+/*modify*/#include "overlay_subtitle.h"
 
 typedef struct GXDisplayProperties 
 {
@@ -82,7 +83,21 @@ typedef struct gapi
 	BOOL (*GXIsDisplayDRAMBuffer)();
 	BOOL (WINAPI* SHFullScreen)(HWND, DWORD);
 
+	/*modify*/
+	node *s;
+	planes Buffer[3];
+	int BufDraw;
+	int BufLast;
+	int BufClear;
+	bool_t BufOn;
+	bool_t BufDiff;
+	/*modify end*/
 } gapi;
+
+/*modify*/
+#define	GAPI_SUB_BUFFER			0x300
+#define	GAPI_SUB_BUFFER_DIFF	0x301
+/*modify end*/
 
 static const datatable Params[] = 
 {
@@ -95,8 +110,54 @@ static const datatable Params[] =
 	{ GAPI_DRAM,	TYPE_BOOL, DF_SETUP | DF_RDONLY | DF_HIDDEN },
 	{ GAPI_POINTER,	TYPE_INT, DF_SETUP | DF_RDONLY|DF_HEX | DF_HIDDEN },
 
+	/*modify*/
+	{ GAPI_SUB_BUFFER,		TYPE_BOOL, DF_SETUP | DF_CHECKLIST },
+	{ GAPI_SUB_BUFFER_DIFF,	TYPE_BOOL, DF_SETUP | DF_CHECKLIST },
+	/*modify end*/
+	
 	DATATABLE_END(GAPI_ID)
 };
+
+/*modify*/
+static int BufferAlign(gapi* p)
+{
+
+	GXDisplayProperties Info = p->GXGetDisplayProperties();
+
+	if((!p->Buffer[0][0])&&(p->Buffer[1][0])){
+		p->Buffer[0][0] = p->Buffer[1][0];
+		p->Buffer[1][0] = NULL;
+	}
+
+	if(p->BufDiff){
+		if(!p->Buffer[0][0]) p->Buffer[0][0] = Alloc16(Info.cxWidth * Info.cyHeight * Info.cBPP >> 3);
+		if(!p->Buffer[1][0]) p->Buffer[1][0] = Alloc16(Info.cxWidth * Info.cyHeight * Info.cBPP >> 3);
+	} else if(p->BufOn){
+		if(!p->Buffer[0][0]) p->Buffer[0][0] = Alloc16(Info.cxWidth * Info.cyHeight * Info.cBPP >> 3);
+		if(p->Buffer[1][0]) { Free16(p->Buffer[1][0]);p->Buffer[1][0] = NULL; }
+	} else {
+		if(p->Buffer[0][0]) { Free16(p->Buffer[0][0]);p->Buffer[0][0] = NULL; }
+		if(p->Buffer[1][0]) { Free16(p->Buffer[1][0]);p->Buffer[1][0] = NULL; }
+	}
+
+	if((!p->Buffer[0][0])&&(p->Buffer[1][0])){
+		p->Buffer[0][0] = p->Buffer[1][0];
+		p->Buffer[1][0] = NULL;
+	}
+
+	p->BufDraw = 0;
+	p->BufLast = 2;
+	p->BufClear = 1;
+
+	return ERR_NONE;
+
+}
+/* end modify*/
+
+/*modify*/
+static int Lock(gapi* p, planes Planes, bool_t OnlyAligned);
+static int Unlock(gapi* p);
+/* end modify*/
 
 static int Enum(gapi* p, int* No, datadef* Param)
 {
@@ -118,6 +179,10 @@ static int Get(gapi* p,int No,void* Data,int Size)
 	case GAPI_FORMAT: GETVALUE(p->Info.ffFormat,int); break;
 	case GAPI_DRAM: GETVALUE(p->DRAM,bool_t); break;
 	case GAPI_POINTER: GETVALUE((int)p->Pointer,int); break;
+	/*modify*/
+	case GAPI_SUB_BUFFER: GETVALUE(p->BufOn, bool_t); break;
+	case GAPI_SUB_BUFFER_DIFF: GETVALUE(p->BufDiff,bool_t); break;
+	/*modify end*/
 	}
 	return Result;
 }
@@ -303,8 +368,174 @@ static int Init(gapi* p)
 	if (Info.cxWidth == 240 && Info.cyHeight == 320)
 		AdjustOrientation(&p->Overlay.Output.Format.Video,0);
 
+	/*modify*/p->s = NodeEnumObject(0,SUBT_ID);
 	return ERR_NONE;
 }
+/*modify*/int Update( gapi* p )
+{
+	if(p->s){
+		RedrawSubtitle(p->s);
+		p->BufDraw = 0;
+		p->BufLast = 2;
+		p->BufClear = 1;
+	}
+	return OverlayUpdateAlign(&(p->Overlay));
+}
+/*modify end*/
+/*modify*/void PlaneCopy(gapi* p, planes Dst, planes Src, planes Last){
+	int Width, Height, DstX, DstY;
+	int x,y;
+	int BPP;
+
+	Width = p->Overlay.DstAlignedRect.Width;
+	Height = p->Overlay.DstAlignedRect.Height;
+	DstX = p->Overlay.DstAlignedRect.x;
+	DstY = p->Overlay.DstAlignedRect.y;
+	BPP = p->Info.cBPP;
+
+	/*if(p->BufClear){
+		int Pitch = Pack->Dst.Pitch;
+		char *SrcPtr = (char*)Src[0] + (DstY * Pitch) + (DstX * Pack->Code[0].DstBPP >> 3);
+		char *DstPtr = (char*)Dst[0] + (DstY * Pitch);
+		int Line = Width * Pack->Code[0].DstBPP >> 3;
+		int Gap = Pitch - (Width * Pack->Code[0].DstBPP >> 3);
+		memset(DstPtr, 0, DstX * Pack->Code[0].DstBPP >> 3);
+		DstPtr += DstX * Pack->Code[0].DstBPP >> 3;
+		for(y=0;y<Height-1;y++){
+			memcpy(DstPtr, SrcPtr, Line);
+			memset(DstPtr + Line, 0, Gap);
+			DstPtr += Pitch;
+			SrcPtr += Pitch;
+		}
+
+		memcpy(DstPtr, SrcPtr, Line);
+		memset(DstPtr + Line, 0, Gap - (DstX * Pack->Code[0].DstBPP >> 3));
+		p->BufClear = 0;
+	} else */
+	if((Last == NULL)||(Last[0] == NULL)){
+		int Pitch = p->Overlay.Output.Format.Video.Pitch;
+		char *SrcPtr = (char*)Src[0] + (DstY * Pitch) + (DstX * BPP >> 3);
+		char *DstPtr = (char*)Dst[0] + (DstY * Pitch) + (DstX * BPP >> 3);
+		int Line = Width * BPP >> 3;
+
+		for(y=0;y<Height;y++){
+			memcpy(DstPtr, SrcPtr, Line);
+			DstPtr += Pitch;
+			SrcPtr += Pitch;
+		}
+
+	} else {
+		// fix me!! (need optimize)
+		switch(BPP){
+			case 8:{
+				int Pitch = p->Overlay.Output.Format.Video.Pitch;
+				char *SrcPtr = (char*)Src[0] + DstY * Pitch + DstX;
+				char *DstPtr = (char*)Dst[0] + DstY * Pitch + DstX;
+				char *LastPtr = (char*)Last[0] + DstY * Pitch + DstX;
+				int Gap = Pitch - Width;
+				for(y=Height;y;y--){
+					for(x=Width;x;x--, SrcPtr++, DstPtr++, LastPtr++){
+						if(*SrcPtr != *LastPtr){
+							*DstPtr = *SrcPtr;
+						}
+					}
+					SrcPtr += Gap;
+					DstPtr += Gap;
+					LastPtr += Gap;
+				}
+				break;
+			}
+			case 16:{
+				int Pitch = p->Overlay.Output.Format.Video.Pitch >> 1;
+				short *SrcPtr = (short*)Src[0] + DstY * Pitch + DstX;
+				short *DstPtr = (short*)Dst[0] + DstY * Pitch + DstX;
+				short *LastPtr = (short*)Last[0] + DstY * Pitch + DstX;
+				for(y=Height;y;y--){
+					int *SrcLine = (int*)SrcPtr;
+					int *DstLine = (int*)DstPtr;
+					int *LastLine = (int*)LastPtr;
+					for(x=Width>>1;x;x--, SrcLine++, DstLine++, LastLine++){
+						if(*SrcLine != *LastLine)
+							*DstLine = *SrcLine;
+					}
+					if((Width & 1)&&(*(short*)SrcLine != *(short*)LastLine))
+						*(short*)DstLine = *(short*)SrcLine;
+					SrcPtr += Pitch;
+					DstPtr += Pitch;
+					LastPtr += Pitch;
+				}
+				break;
+			}
+		};
+	}
+
+	if(p->Buffer[1][0]) {
+		p->BufLast = p->BufDraw;
+		p->BufDraw = 1 - p->BufLast;
+	}
+	return;
+}
+/*modify end*/
+/*modify*/static int Blit(gapi* p, const constplanes Data, const constplanes DataLast )
+{
+
+	planes Planes;
+	int Result;
+	
+	Result = Lock(p, Planes, 1);
+	if (Result==ERR_NONE)
+	{
+		if(p->s){
+			int Redraw;
+			GetSubtitlePos(p->s, p->Overlay.LastTime);
+			Redraw = DrawSubtitle(p->s, &p->Overlay, SUBTITLE_GAPI, -1);
+			if(p->Buffer[1][0]){
+				// Double buffer and diffrent change
+				if(Redraw == -1){
+					BlitImage(p->Overlay.Soft, Planes, Data, DataLast, -1, -1);
+					p->BufDraw = 0;
+					p->BufLast = 2;
+					p->BufClear = 1;
+				} else {
+					if(Redraw == 1)
+						BlitImage(p->Overlay.Soft, p->Buffer[p->BufDraw], Data, NULL, -1, -1);
+					else
+						BlitImage(p->Overlay.Soft, p->Buffer[p->BufDraw], Data, DataLast, -1, -1);
+					BlitSubtitle(p->s, p->Buffer[p->BufDraw][0]);
+					if((DataLast == NULL)||(DataLast[0] == NULL))
+						PlaneCopy(p, Planes, p->Buffer[p->BufDraw], NULL);
+					else
+						PlaneCopy(p, Planes, p->Buffer[p->BufDraw], p->Buffer[p->BufLast]);
+				}
+
+			} else if(Redraw == -1){
+				BlitImage(p->Overlay.Soft, Planes, Data, DataLast, -1, -1);
+			} else if(p->Buffer[0][0]) {
+				// Single buffer
+				if(Redraw == 1)
+					BlitImage(p->Overlay.Soft, p->Buffer[0], Data, NULL, -1, -1);
+				else
+					BlitImage(p->Overlay.Soft, p->Buffer[0], Data, DataLast, -1, -1);
+				BlitSubtitle(p->s, p->Buffer[0][0]);
+				PlaneCopy(p, Planes, p->Buffer[0], NULL);
+			} else {
+				// Not buffering
+				if(Redraw == 1)
+					BlitImage(p->Overlay.Soft, Planes, Data, NULL, -1, -1);
+				else
+					BlitImage(p->Overlay.Soft, Planes, Data, DataLast, -1, -1);
+				BlitSubtitle(p->s, Planes[0]);
+			};
+		} else {
+			BlitImage(p->Overlay.Soft, Planes, Data, DataLast, -1, -1);
+		}
+
+		Unlock(p);
+	}
+
+	return Result;
+}
+/*modify end*/
 
 static void Done(gapi* p)
 {
@@ -435,22 +666,27 @@ static int UpdateWnd(gapi* p)
 	return ERR_NONE;
 }
 
+/*modify part*/
 static int Set(gapi* p,int No,const void* Data,int Size)
 {
-	int Result = OverlaySet(&p->Overlay,No,Data,Size);
+	int Result;
 	switch (No)
 	{
-	case NODE_SETTINGSCHANGED: 
-		Result = UpdateWnd(p);
+	case GAPI_SUB_BUFFER: SETVALUE(p->BufOn,bool_t,Result = BufferAlign(p)); break;
+	case GAPI_SUB_BUFFER_DIFF: SETVALUE(p->BufDiff,bool_t,Result = BufferAlign(p)); break;
+	default: 
+		Result = OverlaySet(&p->Overlay,No,Data,Size);
+	    if (No==NODE_SETTINGSCHANGED) Result = UpdateWnd(p);
 		break;
 	}
 	return Result;
 }
+/*modify part end*/
 
 static int Create(gapi* p)
 {
-	if (NodeEnumObject(NULL,RAW_ID))
-		return ERR_NOT_SUPPORTED;
+	//if (NodeEnumObject(NULL,RAW_ID))
+	//	return ERR_NOT_SUPPORTED;
 
 	p->Overlay.Node.Enum = Enum;
 	p->Overlay.Node.Get = Get;
@@ -462,17 +698,38 @@ static int Create(gapi* p)
 	p->Overlay.Reset = Reset;
 	p->Overlay.Node.Get = Get;
 	p->Overlay.Node.Enum = Enum;
+	/* modify */
+	p->Overlay.Blit = Blit;
+	p->Overlay.Update = Update;
+	/*modify end*/
 
 	if (!LoadDriver(p))
 		return ERR_NOT_SUPPORTED;
 
 	p->AygShell = LoadLibrary(T("aygshell.dll"));
 	GetProc(&p->AygShell,&p->SHFullScreen,T("SHFullScreen"),1);
+
+	/*modify*/
+	p->BufOn = 0;
+	p->BufDiff = 0;
+	p->Buffer[0][0] = NULL;
+	p->Buffer[1][0] = NULL;
+	p->Buffer[2][0] = NULL;
+
+	p->s = NULL;
+	/*modify end*/
+
 	return ERR_NONE;
 }
 
 static void Delete(gapi* p)
 {
+
+	/*modify*/
+	if(p->Buffer[0][0]){ Free16(p->Buffer[0][0]);p->Buffer[0][0] = NULL; }
+	if(p->Buffer[1][0]){ Free16(p->Buffer[1][0]);p->Buffer[1][0] = NULL; }
+	/*modify end*/
+
 	if (p->GX)
 		FreeLibrary(p->GX);
 	if (p->AygShell)

@@ -23,6 +23,7 @@
 
 #include "stdafx.h"
 #include "gxvadd.h"
+/*modify*/#include "../common/overlay/overlay_subtitle.h"
 
 #if defined(ARM)
 
@@ -122,6 +123,7 @@ typedef struct pvr
 	planes BufMem[MAXIDCTBUF];
 	int BufFrameNo[MAXIDCTBUF];
 
+	/*modify*/node *s;
 } pvr;
 
 #define PVR(p) ((pvr*)((char*)(p)-(int)&(((pvr*)0)->IdctVMT)))
@@ -726,6 +728,7 @@ static int Init(pvr* p)
 	if (Result != ERR_NONE)
 		Done(p);
 
+	/*modify*/p->s = NodeEnumObject(0,SUBT_ID);
 	return Result;
 }
 
@@ -736,6 +739,7 @@ static int Update(pvr* p)
 	VDISP_OVERLAYATTRIBS Attribs;
 	bool_t Slept = UpdateDirection(p);
 
+	/*modify*/if(p->s) RedrawSubtitle(p->s);
 	if (p->Brightness != p->p.FX.Brightness ||
 		p->Contrast != p->p.FX.Contrast ||
 		p->Saturation != p->p.FX.Saturation ||
@@ -940,7 +944,17 @@ static int Blit(pvr* p, const constplanes Data, const constplanes DataLast )
 	Result = Lock(p,p->ShowCurr,Planes,1);
 	if (Result == ERR_NONE)
 	{
-		BlitImage(p->p.Soft,Planes,Data,DataLast,p->Overlay.Pitch,-1);
+		/*modify*/
+		if(p->s){
+			GetSubtitlePos(&p->s, p->p.LastTime);
+			DrawSubtitle(&p->s, &(p->p), SUBTITLE_INTEL2700G, p->Overlay.Pitch);
+			BlitImage(p->p.Soft,Planes,Data,DataLast,p->Overlay.Pitch,-1);
+			BlitSubtitle(&p->s,Planes[0]);
+		} else {
+			BlitImage(p->p.Soft,Planes,Data,DataLast,p->Overlay.Pitch,-1);
+		}
+		/*end modify*/
+		//BlitImage(p->p.Soft,Planes,Data,DataLast,p->Overlay.Pitch,-1);
 
 		Unlock(p,p->ShowCurr);
 

@@ -52,6 +52,8 @@ void OverlayConsole_Init();
 void OverlayConsole_Done();
 void OverlaySymbian_Init();
 void OverlaySymbian_Done();
+void SubTitle_Init();
+void SubTitle_Done();
 
 #ifdef TARGET_PALMOS
 #include "../camera/adpcm.h"
@@ -128,6 +130,7 @@ bool_t Context_Init(const tchar_t* Name,const tchar_t* Version,int Id,const tcha
 	ASX_Init();
 	WaveOut_Init();
 	SoftIDCT_Init();
+	SubTitle_Init();
 #if defined(TARGET_PALMOS)
 	OverlayHIRES_Init();
 	//Win_Init();
@@ -223,6 +226,7 @@ void Context_Done()
 #elif defined(TARGET_SYMBIAN)
 	OverlaySymbian_Done();
 #endif
+	SubTitle_Done();
 	SoftIDCT_Done();
 	WaveOut_Done();
 	M3U_Done();

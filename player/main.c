@@ -22,6 +22,7 @@
  ****************************************************************************/
 
 #include "../common/common.h"
+#include "inimode.h"
 
 #ifdef NDEBUG
 static const tchar_t ProgramName[] = T("TCPMP mod");
@@ -158,6 +159,7 @@ int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE hParent,TCHAR* Cmd,int CmdShow)
 	}
 #endif
 
+
 #ifdef NDEBUG
 	if (!FindRunning(Cmd))
 	{
@@ -166,10 +168,13 @@ int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE hParent,TCHAR* Cmd,int CmdShow)
 #endif
 		{
 #ifndef NO_PLUGINS
+
 			HMODULE Module;
+
+			Inimode_Init((char*)ProgramName);
+
 			SetCursor(LoadCursor(NULL, IDC_WAIT));
-			Module = Load(T("interface.plg"));
-			if (Module)
+			Module = Load(T("interface.plg"));	if (Module)
 			{
 				void (*Main)(const tchar_t* Name,const tchar_t* Version,int Id,const tchar_t* CmdLine);
 				*(FARPROC*)&Main = GetProcAddress(Module,TWIN("Main"));
@@ -186,6 +191,7 @@ int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE hParent,TCHAR* Cmd,int CmdShow)
 			CloseHandle(Handle);
 #endif
 			SetCursor(LoadCursor(NULL, IDC_ARROW));
+			Inimode_Done();
 		}
 #ifdef NDEBUG
 	}

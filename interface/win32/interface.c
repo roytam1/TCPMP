@@ -34,6 +34,7 @@
 #include "../skin.h"
 #include "../../config.h"
 #include "limits.h"
+#include "../../common/overlay/overlay_subtitle.h"
 
 #define CORETHEQUE_UI_ID			FOURCC('C','T','Q','U')
 
@@ -49,6 +50,9 @@
 #include <commctrl.h>
 
 #define REG_INITING		0x2400
+
+#define _T(x)       __TEXT(x)
+//#define _CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES 1
 
 #define TIMER_CLIPPING	500
 #define TIMER_INITING	501
@@ -89,7 +93,12 @@
 #define IF_STREAM_SUBTITLE 56000
 
 // After Windows NT.
-#define WM_MOUSEWHEEL                   0x020A
+#define WM_MOUSEWHEEL       0x020A
+#define WM_XBUTTONUP        0x020C
+#define WM_XBUTTONDBLCLK    0x020D
+
+#define XBUTTON1            0x0001
+#define XBUTTON2            0x0002
 
 static int HotKey[] = 
 {
@@ -126,7 +135,10 @@ static int HotKey[] =
 	IF_OPTIONS_SATURATION_DOWN,
 	IF_OPTIONS_TOGGLE_VIDEO,
 	IF_OPTIONS_TOGGLE_AUDIO,
-	//!SUBTITLE IF_OPTIONS_TOGGLE_SUBTITLE,
+	IF_OPTIONS_TOGGLE_SUBTITLE,
+//	IF_OPTIONS_SUBTITLE_RENABLE,
+	IF_OPTIONS_SUBTITLE_PREV,
+//	IF_OPTIONS_SUBTITLE_NEXT,
 	IF_OPTIONS_AUDIO_STEREO_TOGGLE,
 	IF_OPTIONS_SCREEN,
 	IF_FILE_EXIT,
@@ -139,6 +151,7 @@ typedef struct intface
 	win Win;
 	DWORD ThreadId;
 	player* Player;
+	node* Subs;
 	node* Color;
 	node* Equalizer;
 	WNDPROC DefTrackProc;
@@ -167,6 +180,9 @@ typedef struct intface
 	int    WinWheelN;
 	int    WinWheelS;
 	int    WinWheelC;
+	int    WinMouseM;
+	int    WinMouseX1;
+	int    WinMouseX2;
 	int    WinPriority;
 	int    WinSaveShow;
 	int    WinSaveLeft;
@@ -215,6 +231,7 @@ typedef struct intface
 	tchar_t TitleName[256];
 	tchar_t TitleDur[32];
 	int MenuPreAmp;
+	int MenuSubsSpeed;
 
 	int MenuStreams;
 	int MenuAStream;
@@ -281,7 +298,7 @@ static int UpdateWinTitle(intface* p);
 static int UpdateWinPos(intface* p);
 static int SaveWinPos(intface* p);
 static int UpdateTopMost(intface* p);
-static int UpdateWinWheel(intface* p,int Cmd);
+static int UpdateWinMouse(intface* p,int Cmd);
 static int UpdateWinPriority(intface* p,int Cmd);
 static void UpdateClipping(intface* p,bool_t Suggest,bool_t HotKey);
 static int Command(intface* p,int Cmd);
@@ -754,23 +771,35 @@ static void UpdateMenuFrac(intface* p,int MenuId,int Param,int Num,int Den)
 	WinMenuCheck(&p->Win,1,MenuId,f.Num*Den==f.Den*Num);
 }
 
-static void  WinWheelCheck(intface* p);
-static void  WinWheelCheck(intface* p)
+static void  WinMouseCheck(intface* p);
+static void  WinMouseCheck(intface* p)
 {
 	int i;
 
-	for( i=1 ; i<=3 ; i++ )
+	for( i=1 ; i<=(int)IF_OPTIONS_WHEEL_SATURATION ; i++ )
 		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_N+i,0);
 
-	for( i=1 ; i<=3 ; i++ )
+	for( i=1 ; i<=(int)IF_OPTIONS_WHEEL_SATURATION ; i++ )
 		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_S+i,0);
 
-	for( i=1 ; i<=3 ; i++ )
+	for( i=1 ; i<=(int)IF_OPTIONS_WHEEL_SATURATION ; i++ )
 		WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_C+i,0);
+
+	for( i=1 ; i<=(int)IF_OPTIONS_MOUSE_M_PLAYLIST ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_M+i,0);
+
+	for( i=1 ; i<=(int)IF_OPTIONS_MOUSE_X1_PLAYLIST ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_X1+i,0);
+
+	for( i=1 ; i<=(int)IF_OPTIONS_MOUSE_X2_PLAYLIST ; i++ )
+		WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_X2+i,0);
 
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_N+p->WinWheelN,1);
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_S+p->WinWheelS,1);
 	WinMenuCheck(&p->Win,1,IF_OPTIONS_WHEEL_C+p->WinWheelC,1);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_M+p->WinMouseM,1);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_X1+p->WinMouseX1,1);
+	WinMenuCheck(&p->Win,1,IF_OPTIONS_MOUSE_X2+p->WinMouseX2,1);
 
 }
 
@@ -814,11 +843,19 @@ static void UpdateMenu(intface* p)
 	int* i;
 	int No,Id;
 	int PreAmp;
+	int SubsSpeed;
 	bool_t Accel;
 	tchar_t Name[20+1];
 	int ACurrent = -1;
 	int VCurrent = -1;
 	int SubCurrent = -1;
+	int SubtType=0;
+	int SubNo;
+	tchar_t* SubVal;
+	tchar_t* temp;
+
+	if (!p->Subs)  p->Subs=NodeEnumObject(0,SUBT_ID);
+	//if (p->Subs)  SubtitleLoad(p->Subs);
 
 	// remove old chapters
 	if (!WinMenuEnable(&p->Win,0,IF_FILE_CHAPTERS_NONE,0))
@@ -855,8 +892,8 @@ static void UpdateMenu(intface* p)
 			WinMenuDelete(&p->Win,1,IF_STREAM_AUDIO+No);
 	}
 
-	if (p->MenuSubStream >= 0)
-		for (No=0;No<p->MenuStreams;++No)
+	//if (p->MenuSubStream >= 0)
+		for (No=0;No<MAXSUBFILES+1;No++)
 			WinMenuDelete(&p->Win,1,IF_STREAM_SUBTITLE+No);
 
 	// add new streams
@@ -887,6 +924,32 @@ static void UpdateMenu(intface* p)
 	p->Player->Get(p->Player,PLAYER_VSTREAM,&VCurrent,sizeof(int));
 	p->Player->Get(p->Player,PLAYER_ASTREAM,&ACurrent,sizeof(int));
 	p->Player->Get(p->Player,PLAYER_SUBSTREAM,&SubCurrent,sizeof(int));
+
+	if (p->Subs)
+	{
+		WinMenuInsert(&p->Win,1,IF_OPTIONS_SUBTITLE_STREAM_NONE,IF_STREAM_SUBTITLE,_T("Open..."));
+		for(SubNo=0;SubNo<MAXSUBFILES;SubNo++)
+		{
+			p->Subs->Get(p->Subs,SUBT_STREAM+SubNo,&SubVal,sizeof(SubVal));
+			if (SubVal)
+			{
+				SubtType=0; temp=SubVal; while(*temp!=0) {SubtType++; temp++;}
+				if (SubtType>16)
+				{
+					SubVal+=(SubtType-16);
+					Name[0]=Name[1]=Name[2]='.';
+					temp=Name+3;
+				}
+				while(*SubVal!='\0') {*temp=*SubVal; *temp++; *SubVal++;}
+				*temp='\0';
+				WinMenuInsert(&p->Win,1,IF_OPTIONS_SUBTITLE_STREAM_NONE,IF_STREAM_SUBTITLE+SubNo+1,Name);
+			}
+			else break;
+		}
+		p->Subs->Get(p->Subs,SUBT_STREAM_ID,&SubCurrent,sizeof(SubCurrent));
+		if (SubCurrent!=-1) SubCurrent++;
+		p->MenuSubStream =SubCurrent;
+	}
 
 	if (p->MenuVStream<0)
 		WinMenuEnable(&p->Win,1,IF_OPTIONS_VIDEO_STREAM_NONE,0);
@@ -948,7 +1011,7 @@ static void UpdateMenu(intface* p)
 	WinPriorityCheck(p);
 	
 	// Update Menu Wheel
-	WinWheelCheck(p);
+	WinMouseCheck(p);
 
 	//UpdateMenuInt(p,IF_OPTIONS_AUDIO_QUALITY_LOW,PLAYER_AUDIO_QUALITY,0);
 	//UpdateMenuInt(p,IF_OPTIONS_AUDIO_QUALITY_MEDIUM,PLAYER_AUDIO_QUALITY,1);
@@ -962,6 +1025,20 @@ static void UpdateMenu(intface* p)
 		stprintf_s(Name,TSIZEOF(Name),LangStr(INTERFACE_ID,IF_OPTIONS_AUDIO_PREAMP),PreAmp);
 		WinMenuDelete(&p->Win,1,IF_OPTIONS_AUDIO_PREAMP);
 		WinMenuInsert(&p->Win,1,IF_OPTIONS_AUDIO_PREAMP_INC,IF_OPTIONS_AUDIO_PREAMP,Name);
+	}
+
+	if (!p->Subs) p->Subs=NodeEnumObject(0,SUBT_ID);
+	if (p->Subs)
+	{
+		if (p->Subs->Get(p->Subs,SUBT_SPEED,&SubsSpeed,sizeof(SubsSpeed)) != ERR_NONE)
+			SubsSpeed = 0;
+		if (SubsSpeed != p->MenuSubsSpeed)
+		{
+			p->MenuSubsSpeed = SubsSpeed;
+			stprintf_s(Name,TSIZEOF(Name),LangStr(INTERFACE_ID,IF_OPTIONS_SUBTITLE_SNORMAL),SubsSpeed);
+			WinMenuDelete(&p->Win,1,IF_OPTIONS_SUBTITLE_SNORMAL);
+			WinMenuInsert(&p->Win,1,IF_OPTIONS_SUBTITLE_SLATER,IF_OPTIONS_SUBTITLE_SNORMAL,Name);
+		}
 	}
 
 	UpdateMenuInt(p,IF_OPTIONS_VIDEO_QUALITY_LOWEST,PLAYER_VIDEO_QUALITY,0);
@@ -1460,7 +1537,13 @@ LRESULT CALLBACK TrackProc(HWND WndTrack, UINT Msg, WPARAM wParam, LPARAM lParam
 			StopSeek(p);
 		}
 		return 0;
+	}	
+	if ( (Msg == WM_MBUTTONUP) ||
+	     (Msg == WM_MBUTTONDOWN) )
+	{
+		return 0;
 	}
+
 	return CallWindowProc(p->DefTrackProc,WndTrack,Msg,wParam,lParam);
 }
 
@@ -1674,8 +1757,12 @@ static menudef MenuDef[] =
 	{ 2,INTERFACE_ID, IF_OPTIONS_AUDIO_STREAM, MENU_SMALL|MENU_GRAYED },
 	{ 3,INTERFACE_ID, IF_OPTIONS_AUDIO_STREAM_NONE },
 
-//!SUBTITLE	{ 1,INTERFACE_ID, IF_OPTIONS_SUBTITLE_STREAM, MENU_GRAYED },
-//!SUBTITLE	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_STREAM_NONE },
+	{ 1,INTERFACE_ID, IF_OPTIONS_SUBTITLE_STREAM},
+	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_STREAM_NONE },
+	{ 2,-1,-1 },
+	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_SEARLIER },
+	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_SNORMAL },
+	{ 2,INTERFACE_ID, IF_OPTIONS_SUBTITLE_SLATER },
 
 	{ 1,-1,-1 },
 	{ 1,INTERFACE_ID, IF_OPTIONS_REPEATTRACK },
@@ -1706,22 +1793,50 @@ static menudef MenuDef[] =
 	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_NORMAL }, 
 	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_BELOWNORMAL }, 
 	{ 2,INTERFACE_ID, IF_OPTIONS_PRIORITY_IDLE }, 
-	{ 1,INTERFACE_ID, IF_OPTIONS_WHEEL },
-	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_NONE },
-	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_VOL },
-	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_SEEK },
-	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N_ZOOM },
+	{ 1,INTERFACE_ID, IF_OPTIONS_MOUSE },
+	{ 2,INTERFACE_ID, IF_OPTIONS_MOUSE_M },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_M_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_M_PLAY },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_M_MAXWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_M_MINWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_M_PLAYLIST },
+	{ 2,INTERFACE_ID, IF_OPTIONS_MOUSE_X1 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X1_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X1_PLAY },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X1_MAXWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X1_MINWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X1_PLAYLIST },
+	{ 2,INTERFACE_ID, IF_OPTIONS_MOUSE_X2 },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X2_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X2_PLAY },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X2_MAXWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X2_MINWIN },
+	{ 3,INTERFACE_ID, IF_OPTIONS_MOUSE_X2_PLAYLIST },
 	{ 2,-1,-1 },
+	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_N },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_NONE },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_VOL },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_SEEK },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_ZOOM },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_BRIGHTNESS },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_CONTRAST },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_N_SATURATION },
 	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_S },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_NONE },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_VOL },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_SEEK },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_ZOOM },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_BRIGHTNESS },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_CONTRAST },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_S_SATURATION },
 	{ 2,INTERFACE_ID, IF_OPTIONS_WHEEL_C },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_NONE },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_VOL },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_SEEK },
 	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_ZOOM },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_BRIGHTNESS },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_CONTRAST },
+	{ 3,INTERFACE_ID, IF_OPTIONS_WHEEL_C_SATURATION },
 	{ 1,-1,-1 },
 	{ 1,INTERFACE_ID, IF_OPTIONS_SETTINGS },
 
@@ -2057,13 +2172,22 @@ static int UpdateButtonBar(intface* p)
 static int UpdateWinTitle(intface* p)
 {
 	int Style;
+	char WindowText[1024];
 
 	if (p->Win.Wnd == NULL)
 		return ERR_NONE;
 
 	if(p->WinTitle == 0) 
 	{
-		Style = WS_VISIBLE | WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+		memset(WindowText, '\0', sizeof(WindowText));
+		GetWindowText(p->Win.Wnd, WindowText, sizeof(WindowText));
+
+		Style = WS_VISIBLE | WS_POPUP | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX;
+
+		SetWindowLongPtr(p->Win.Wnd, GWL_STYLE, Style);
+		SetWindowPos(p->Win.Wnd,NULL,0,0,0,0,(SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED));
+
+		SetWindowText(p->Win.Wnd, WindowText);
 	}
 	else
 	{
@@ -2071,10 +2195,11 @@ static int UpdateWinTitle(intface* p)
 		if( Style == (Style | WS_OVERLAPPEDWINDOW) )
 			return ERR_NONE;
 		Style = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
+
+		SetWindowLongPtr(p->Win.Wnd, GWL_STYLE, Style);
+		SetWindowPos(p->Win.Wnd,NULL,0,0,0,0,(SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED));
 	}
 
-	SetWindowLong(p->Win.Wnd, GWL_STYLE, Style);
-	SetWindowPos(p->Win.Wnd,NULL,0,0,0,0,(SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED));
 
 	return ERR_NONE;
 }
@@ -2157,6 +2282,56 @@ static int UpdateSkinFile(intface* p)
 	return ERR_NONE;
 }
 
+static int MouseClick(intface* p, int Msg, uint32_t wParam, uint32_t lParam)
+{
+	int    cmd;
+	
+	switch(Msg)
+	{
+	case WM_MBUTTONUP:
+	case WM_MBUTTONDBLCLK:
+		cmd = p->WinMouseM;
+		break;
+	case WM_XBUTTONUP:
+	case WM_XBUTTONDBLCLK:
+		if( HIWORD(wParam) == XBUTTON1 )
+			cmd = p->WinMouseX1;
+		else
+			cmd = p->WinMouseX2;
+		break;
+	default:
+		return ERR_NONE;
+	}
+
+	switch(cmd)
+	{
+	case IF_OPTIONS_MOUSE_NONE:
+		break;
+	case IF_OPTIONS_MOUSE_PLAY:
+		Command(p, IF_PLAYPAUSE);
+		break;
+	case IF_OPTIONS_MOUSE_MAXWIN:
+		if(p->WinTitle == 0) 
+			break;
+
+		if(IsZoomed(p->Win.Wnd) == 0)
+			ShowWindow(p->Win.Wnd, SW_MAXIMIZE);
+		else
+			ShowWindow(p->Win.Wnd, SW_RESTORE);
+		break;
+	case IF_OPTIONS_MOUSE_MINWIN:
+		ShowWindow(p->Win.Wnd, SW_MINIMIZE);
+		break;
+	case IF_OPTIONS_MOUSE_PLAYLIST:
+		Command(p, IF_FILE_PLAYLIST);
+		break;
+	default:
+		break;
+	}
+
+	return ERR_NONE;
+}
+
 static int MouseWheel(intface* p, uint32_t wParam, uint32_t lParam)
 {
 	bool_t wheel;
@@ -2206,6 +2381,24 @@ static int MouseWheel(intface* p, uint32_t wParam, uint32_t lParam)
 			Command(p, IF_OPTIONS_ZOOM_OUT);
 		else
 			Command(p, IF_OPTIONS_ZOOM_IN);
+		break;
+	case IF_OPTIONS_WHEEL_BRIGHTNESS:
+		if (wheel == 1)
+			Command(p, IF_OPTIONS_BRIGHTNESS_UP);
+		else
+			Command(p, IF_OPTIONS_BRIGHTNESS_DOWN);
+		break;
+	case IF_OPTIONS_WHEEL_CONTRAST:
+		if (wheel == 1)
+			Command(p, IF_OPTIONS_CONTRAST_UP);
+		else
+			Command(p, IF_OPTIONS_CONTRAST_DOWN);
+		break;
+	case IF_OPTIONS_WHEEL_SATURATION:
+		if (wheel == 1)
+			Command(p, IF_OPTIONS_SATURATION_UP);
+		else
+			Command(p, IF_OPTIONS_SATURATION_DOWN);
 		break;
 	default:
 		break;
@@ -2280,7 +2473,7 @@ static int UpdateTopMost(intface* p)
 	return ERR_NONE;
 }
 
-static int UpdateWinWheel(intface* p,int Cmd)
+static int UpdateWinMouse(intface* p,int Cmd)
 {
 
 	if ( Cmd >= IF_OPTIONS_WHEEL_N && Cmd <= IF_OPTIONS_WHEEL_N + 0x0F )
@@ -2294,6 +2487,18 @@ static int UpdateWinWheel(intface* p,int Cmd)
 	else if ( Cmd >= IF_OPTIONS_WHEEL_C && Cmd <= IF_OPTIONS_WHEEL_C + 0x0F )
 	{
 		p->WinWheelC = Cmd - IF_OPTIONS_WHEEL_C;
+	}
+	else if ( Cmd >= IF_OPTIONS_MOUSE_M && Cmd <= IF_OPTIONS_MOUSE_M + 0x0F )
+	{
+		p->WinMouseM = Cmd - IF_OPTIONS_MOUSE_M;
+	}
+	else if ( Cmd >= IF_OPTIONS_MOUSE_X1 && Cmd <= IF_OPTIONS_MOUSE_X1 + 0x0F )
+	{
+		p->WinMouseX1 = Cmd - IF_OPTIONS_MOUSE_X1;
+	}
+	else if ( Cmd >= IF_OPTIONS_MOUSE_X2 && Cmd <= IF_OPTIONS_MOUSE_X2 + 0x0F )
+	{
+		p->WinMouseX2 = Cmd - IF_OPTIONS_MOUSE_X2;
 	}
 
 	return ERR_NONE;
@@ -2343,6 +2548,7 @@ static int Command(intface* p,int Cmd)
 	fraction f;
 	tick_t t;
 	int Zero = 0;
+	wchar_t* subsfn;
 
 	switch (Cmd)
 	{
@@ -2401,8 +2607,49 @@ static int Command(intface* p,int Cmd)
 
 	case IF_OPTIONS_TOGGLE_SUBTITLE:
 		ToggleStream(p,PLAYER_SUBSTREAM,PACKET_SUBTITLE,1);
+		i=-1;
+		p->Subs->Get(p->Subs,SUBT_STREAM_ID,&i,sizeof(i));
+		//if (i==-1) break;
+		i++;
+		subsfn=0;
+		p->Subs->Get(p->Subs,SUBT_STREAM+i,&subsfn,sizeof(subsfn));
+		if (!subsfn)
+			if (i>1) i=0;
+			else i=-1;
+		p->Subs->Set(p->Subs,SUBT_STREAM_ID,&i,sizeof(i));
 		break;
-
+/*
+	case IF_OPTIONS_SUBTITLE_RENABLE:
+		p->Subs->Get(p->Subs,SUBT_ENABLED,&i,sizeof(i));
+		if (i) i=0; else i=-1;
+		p->Subs->Set(p->Subs,SUBT_ENABLED,&i,sizeof(i));
+		break;
+*/
+	case IF_OPTIONS_SUBTITLE_PREV:
+		//SetKeyInSeek(p);
+		/*
+		i=-1;
+		if (p->Subs) p->Subs->Get(p->Subs,SUBT_PREV_SUB,&i,sizeof(i));
+		if (i==-1) {p->Player->Set(p->Player,PLAYER_MOVEBACK,NULL,0);}
+		else p->Player->Set(p->Player,PLAYER_POSITION,&i,sizeof(i));*/
+		p->Player->Get(p->Player,PLAYER_POSITION,&i,sizeof(i));
+		i-=TICKSPERSEC/2;
+		p->Player->Set(p->Player,PLAYER_POSITION,&i,sizeof(i));
+		break;
+/*
+	case IF_OPTIONS_SUBTITLE_NEXT:
+		//SetKeyInSeek(p);
+		/*
+		i=-1;
+		if (p->Subs) p->Subs->Get(p->Subs,SUBT_NEXT_SUB,&i,sizeof(i));
+		if (i==-1) {p->Player->Set(p->Player,PLAYER_MOVEFFWD,NULL,0);}
+		else p->Player->Set(p->Player,PLAYER_POSITION,&i,sizeof(i));
+		*/
+/*
+		p->Player->Get(p->Player,PLAYER_POSITION,&i,sizeof(i));
+		p->Player->Set(p->Player,PLAYER_POSITION,&i,sizeof(i));
+		break;
+*/
 	case IF_OPTIONS_TOGGLE_AUDIO:
 		ToggleStream(p,PLAYER_ASTREAM,PACKET_AUDIO,0);
 		break;
@@ -2884,6 +3131,28 @@ static int Command(intface* p,int Cmd)
 		p->Player->Set(p->Player,PLAYER_PREAMP,&i,sizeof(i));
 		break;
 
+	case IF_OPTIONS_SUBTITLE_SLATER:
+		if (!p->Subs) break;
+		p->Subs->Get(p->Subs,SUBT_SPEED,&i,sizeof(i));
+		i += 5;
+		//if (i>300) i=300;
+		p->Subs->Set(p->Subs,SUBT_SPEED,&i,sizeof(i));
+		break;
+
+	case IF_OPTIONS_SUBTITLE_SEARLIER:
+		if (!p->Subs) break;
+		p->Subs->Get(p->Subs,SUBT_SPEED,&i,sizeof(i));
+		i -= 5;
+		//if (i<-300) i=-300;
+		p->Subs->Set(p->Subs,SUBT_SPEED,&i,sizeof(i));
+		break;
+
+	case IF_OPTIONS_SUBTITLE_SNORMAL:
+		if (!p->Subs) break;
+		i = 0;
+		p->Subs->Set(p->Subs,SUBT_SPEED,&i,sizeof(i));
+		break;
+
 	case IF_OPTIONS_AUDIO_QUALITY_LOW:
 		i = 0;
 		p->Player->Set(p->Player,PLAYER_AUDIO_QUALITY,&i,sizeof(i));
@@ -2930,7 +3199,32 @@ static int Command(intface* p,int Cmd)
 	case IF_OPTIONS_WHEEL_N_ZOOM:
 	case IF_OPTIONS_WHEEL_S_ZOOM:
 	case IF_OPTIONS_WHEEL_C_ZOOM:
-		UpdateWinWheel(p, Cmd);
+	case IF_OPTIONS_WHEEL_N_BRIGHTNESS:
+	case IF_OPTIONS_WHEEL_S_BRIGHTNESS:
+	case IF_OPTIONS_WHEEL_C_BRIGHTNESS:
+	case IF_OPTIONS_WHEEL_N_CONTRAST:
+	case IF_OPTIONS_WHEEL_S_CONTRAST:
+	case IF_OPTIONS_WHEEL_C_CONTRAST:
+	case IF_OPTIONS_WHEEL_N_SATURATION:
+	case IF_OPTIONS_WHEEL_S_SATURATION:
+	case IF_OPTIONS_WHEEL_C_SATURATION:
+	case IF_OPTIONS_MOUSE_M_NONE:
+	case IF_OPTIONS_MOUSE_X1_NONE:
+	case IF_OPTIONS_MOUSE_X2_NONE:
+	case IF_OPTIONS_MOUSE_M_PLAY:
+	case IF_OPTIONS_MOUSE_X1_PLAY:
+	case IF_OPTIONS_MOUSE_X2_PLAY:
+	case IF_OPTIONS_MOUSE_M_MAXWIN:
+	case IF_OPTIONS_MOUSE_X1_MAXWIN:
+	case IF_OPTIONS_MOUSE_X2_MAXWIN:
+	case IF_OPTIONS_MOUSE_M_MINWIN:
+	case IF_OPTIONS_MOUSE_X1_MINWIN:
+	case IF_OPTIONS_MOUSE_X2_MINWIN:
+	case IF_OPTIONS_MOUSE_M_PLAYLIST:
+	case IF_OPTIONS_MOUSE_X1_PLAYLIST:
+	case IF_OPTIONS_MOUSE_X2_PLAYLIST:
+
+		UpdateWinMouse(p, Cmd);
 		break;
 
 	case IF_OPTIONS_PRIORITY_HIGH:
@@ -3017,8 +3311,11 @@ static int Command(intface* p,int Cmd)
 		break;
 
 	case IF_OPTIONS_SUBTITLE_STREAM_NONE:
-		i = MAXSTREAM;
-		p->Player->Set(p->Player,PLAYER_SUBSTREAM,&i,sizeof(i));
+		//i = MAXSTREAM;
+		i=-1;
+		p->Subs->Set(p->Subs,SUBT_STREAM_ID,&i,sizeof(i));
+		//if (p->Subs) p->Subs->Set(p->Subs,SUBT_ENABLED,&i,sizeof(i));
+		//p->Player->Set(p->Player,PLAYER_SUBSTREAM,&i,sizeof(i));
 		break;
 	}
 
@@ -3045,9 +3342,13 @@ static int Command(intface* p,int Cmd)
 
 	if (Cmd >= IF_STREAM_SUBTITLE && Cmd < IF_STREAM_SUBTITLE+MAXSTREAM)
 	{
-		i = Cmd-IF_STREAM_SUBTITLE;
-		p->Player->Set(p->Player,PLAYER_SUBSTREAM,&i,sizeof(i));
-		p->Player->Set(p->Player,PLAYER_RESYNC,NULL,0);
+		i=Cmd-IF_STREAM_SUBTITLE-1;
+		if (i==-1) i=-2;
+		p->Subs->Set(p->Subs,SUBT_STREAM_ID,&i,sizeof(i));
+		//if (p->Subs) p->Subs->Set(p->Subs,SUBT_ENABLED,&i,sizeof(i));
+		//i = Cmd-IF_STREAM_SUBTITLE;
+		//p->Player->Set(p->Player,PLAYER_SUBSTREAM,&i,sizeof(i));
+		//p->Player->Set(p->Player,PLAYER_RESYNC,NULL,0);
 	}
 
 	if (Cmd >= IF_VIDEO && Cmd < IF_VIDEO+ARRAYCOUNT(p->VOutput,int))
@@ -3083,7 +3384,8 @@ static int PlayerNotify(intface* p,int Id,int Value)
 		p->TitleTimeWidth = 0;
 		if (Value)
 			p->TitleTime = -1;
-		if (p->WndTitle && !p->FullScreen)
+//		if (!p->Win.FullScreen && !p->Bench && (!p->InSeek || !p->Capture))
+		if (!p->Bench && (!p->InSeek || !p->Capture))
 			InvalidateRect(p->WndTitle,NULL,1); // redraws timer too!
 		if (!p->Win.FullScreen && !p->Bench && p->InSeek && p->Capture)
 			PostMessage(p->Win.Wnd,MSG_PLAYER,PLAYER_PERCENT,Value);
@@ -3094,6 +3396,12 @@ static int PlayerNotify(intface* p,int Id,int Value)
 //		if (!p->Win.FullScreen && !p->Bench && (!p->InSeek || !p->Capture))
 		if (!p->Bench && (!p->InSeek || !p->Capture))
 			PostMessage(p->Win.Wnd,MSG_PLAYER,PLAYER_PERCENT,Value);
+	}
+	else if (Id==PLAYER_PLAY)
+	{
+		if (!p->Subs)  p->Subs=NodeEnumObject(0,SUBT_ID);
+		if (p->Subs)  SubtitleLoad(p->Subs);
+		PostMessage(p->Win.Wnd,MSG_PLAYER,Id,Value);
 	}
 	else
 		PostMessage(p->Win.Wnd,MSG_PLAYER,Id,Value);
@@ -3653,6 +3961,13 @@ static bool_t Proc(intface* p, int Msg, uint32_t wParam, uint32_t lParam, int* R
 			while ( ShowCursor(0) > -1 ){;}
 		break;
 
+	case WM_MBUTTONUP:
+	case WM_MBUTTONDBLCLK:
+	case WM_XBUTTONUP:
+	case WM_XBUTTONDBLCLK:
+		MouseClick(p, Msg, wParam, lParam);
+		break;
+
 	case WM_MOUSEWHEEL:
 		MouseWheel(p, wParam, lParam);
 		break;
@@ -3765,6 +4080,7 @@ static const datatable Params[] =
 	{ IF_WHEEL_N,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
 	{ IF_WHEEL_S,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
 	{ IF_WHEEL_C,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
+	{ IF_MOUSE_M,			TYPE_INT,  DF_SETUP|DF_HIDDEN },
 	{ IF_WINPRIORITY,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
 	{ IF_WINSAVESHOW,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
 	{ IF_WINSAVELEFT,		TYPE_INT,  DF_SETUP|DF_HIDDEN },
@@ -3826,6 +4142,9 @@ static int Get(intface* p,int No,void* Data,int Size)
 	case IF_WHEEL_N: GETVALUE(p->WinWheelN,int); break;
 	case IF_WHEEL_S: GETVALUE(p->WinWheelS,int); break;
 	case IF_WHEEL_C: GETVALUE(p->WinWheelC,int); break;
+	case IF_MOUSE_M: GETVALUE(p->WinMouseM,int); break;
+	case IF_MOUSE_X1: GETVALUE(p->WinMouseX1,int); break;
+	case IF_MOUSE_X2: GETVALUE(p->WinMouseX2,int); break;
 	case IF_WINPRIORITY: GETVALUE(p->WinPriority,int); break;
 	case IF_WINSAVESHOW: GETVALUE(p->WinSaveShow,int); break;
 	case IF_WINSAVELEFT: GETVALUE(p->WinSaveLeft,int); break;
@@ -3946,6 +4265,9 @@ static int Set(intface* p,int No,const void* Data,int Size)
 	case IF_WHEEL_N: SETVALUE(p->WinWheelN,int,ERR_NONE); break;
 	case IF_WHEEL_S: SETVALUE(p->WinWheelS,int,ERR_NONE); break;
 	case IF_WHEEL_C: SETVALUE(p->WinWheelC,int,ERR_NONE); break;
+	case IF_MOUSE_M: SETVALUE(p->WinMouseM,int,ERR_NONE); break;
+	case IF_MOUSE_X1: SETVALUE(p->WinMouseX1,int,ERR_NONE); break;
+	case IF_MOUSE_X2: SETVALUE(p->WinMouseX2,int,ERR_NONE); break;
 	case IF_WINPRIORITY: SETVALUE(p->WinPriority,int,UpdateWinPriority(p, 0)); break;
 	case IF_WINSAVESHOW: SETVALUE(p->WinSaveShow,int,ERR_NONE); break;
 	case IF_WINSAVELEFT: SETVALUE(p->WinSaveLeft,int,ERR_NONE); break;
@@ -3972,6 +4294,7 @@ static void DefaultSkin(intface* p)
 static int Create(intface* p)
 {
 	int Key;
+
 	DefaultSkin(p);
 	
 	p->Win.WinWidth = 360;
@@ -3995,6 +4318,10 @@ static int Create(intface* p)
 	p->WinWheelS = 1;
 	p->WinWheelC = 1;
 
+	p->WinMouseM = 1;
+	p->WinMouseX1 = 1;
+	p->WinMouseX2 = 1;
+
 	p->WinPriority = IF_OPTIONS_PRIORITY_NORMAL - IF_OPTIONS_PRIORITY;
 
 	p->TopMost = 0;
@@ -4002,6 +4329,7 @@ static int Create(intface* p)
 	p->WinSaveHeight = 240;
 
 	p->MenuPreAmp = -1;
+	p->MenuSubsSpeed = -1;
 	p->MenuStreams = 0;
 	p->MenuAStream = -1;
 	p->MenuVStream = -1;
