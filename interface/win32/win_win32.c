@@ -1358,7 +1358,7 @@ static void CreateEditor(win* p, wincontrol* Control, int Left, int Top, int Wid
 
 #ifdef TARGET_WIN32
 	if ((Width > 32) && DataDef->Type!=TYPE_STRING)
-		Width = 32;
+		Width = 40;
 #else
 	if ((Width > 30) && DataDef->Type!=TYPE_STRING)
 		Width = 30;

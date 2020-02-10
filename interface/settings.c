@@ -112,6 +112,7 @@ static void UpdatePage(settings* p)
 			(Class == PLATFORM_ID) ? 60:
 			(p->Win.ScreenWidth < 130) ? 80:
 			(Class == PLAYER_ID || Class == ADVANCED_ID) ? 120:90;
+		p->Win.LabelWidth = p->Win.LabelWidth + 60;
 
 		CheckList = Class == ASSOCIATION_ID;
 		y = 2;
@@ -241,7 +242,7 @@ static int Create(settings* p)
 {
 	SettingsCreate(&p->Win);
 #ifdef TARGET_WIN32
-	p->Win.WinWidth = 190;
+	p->Win.WinWidth = 250;
 #else
 	p->Win.WinWidth = 180;
 #endif

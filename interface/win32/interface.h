@@ -149,6 +149,13 @@ void Interface_Done();
 #define IF_OPTIONS_SKIN					0x260
 #define IF_OPTIONS_AUDIO_STEREO_TOGGLE	0x261
 
+#define IF_OPTIONS_PRIORITY				0x311
+#define IF_OPTIONS_PRIORITY_HIGH		0x312
+#define IF_OPTIONS_PRIORITY_AVOBENORMAL	0x313
+#define IF_OPTIONS_PRIORITY_NORMAL		0x314
+#define IF_OPTIONS_PRIORITY_BELOWNORMAL	0x315
+#define IF_OPTIONS_PRIORITY_IDLE		0x316
+
 #define IF_FILE							0x0DC
 #define IF_FILE_OPENFILE                0x181
 #define IF_FILE_PLAYLIST                0x17E
@@ -187,6 +194,8 @@ void Interface_Done();
 #define IF_WINSAVETOP					0x322
 #define IF_WINSAVEWIDTH					0x323
 #define IF_WINSAVEHEIGHT				0x324
+
+#define IF_WINPRIORITY					0x350
 
 #define IF_SKINPATH						0x503
 #define IF_SKINNO						0x500
